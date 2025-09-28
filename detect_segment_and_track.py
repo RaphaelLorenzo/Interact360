@@ -41,6 +41,61 @@ SAM2_MODEL_TO_CFG = {
     "large": "configs/sam2.1/sam2.1_hiera_l.yaml"
 }
 
+MAX_OCCLUSION_FRAMES_COUNT = 60
+MIN_OVERLAP_IOU_BOXES = 0.5
+MIN_OVERLAP_IOU_MASKS = 0.8
+MIN_MASK_IN_MASK_COMP_PROP = 0.95 # if 95% of the current mask is in the compared mask, we consider that we actually are a subpart of it and break
+
+COLORS_SEQUENCE_BGR = [(98, 170, 174), (200, 150, 168), (213, 208, 44), (191, 14, 148), (150, 138, 149), 
+            (133, 161, 102), (105, 161, 43), (71, 120, 13), (13, 81, 212), (44, 150, 224), 
+            (243, 207, 71), (157, 248, 179), (121, 164, 71), (34, 93, 202), (175, 49, 4), 
+            (43, 248, 163), (38, 20, 240), (59, 191, 20), (142, 8, 82), (219, 88, 31), 
+            (37, 147, 24), (83, 137, 140), (218, 35, 175), (94, 237, 138), (35, 91, 70), 
+            (7, 55, 87), (223, 77, 210), (173, 146, 250), (1, 131, 67), (62, 12, 215)]  
+
+def get_iou_torch(track_mask, local_mask):
+    assert(track_mask.dtype == torch.bool), "Track mask must be a boolean tensor got {}".format(track_mask.dtype)
+    assert(local_mask.dtype == torch.bool), "Local mask must be a boolean tensor got {}".format(local_mask.dtype)
+    assert(track_mask.shape == local_mask.shape), "Track mask and local mask must have the same shape got {} and {}".format(track_mask.shape, local_mask.shape)
+    assert(track_mask.device == local_mask.device), "Track mask and local mask must be on the same device got {} and {}".format(track_mask.device, local_mask.device)
+    # compute the iou
+    iou = torch.sum(track_mask & local_mask) / torch.sum(track_mask | local_mask)
+    return iou
+
+def prop_of_mask1_in_mask2_torch(mask1, mask2):
+    assert(mask1.dtype == torch.bool), "Mask1 must be a boolean tensor got {}".format(mask1.dtype)
+    assert(mask2.dtype == torch.bool), "Mask2 must be a boolean tensor got {}".format(mask2.dtype)
+    assert(mask1.shape == mask2.shape), "Mask1 and Mask2 must have the same shape got {} and {}".format(mask1.shape, mask2.shape)
+    assert(mask1.device == mask2.device), "Mask1 and Mask2 must be on the same device got {} and {}".format(mask1.device, mask2.device)
+    # compute the proportion of mask1 in mask2
+    prop = torch.sum(mask1 & mask2) / torch.sum(mask1)
+    return prop
+
+def bb_intersection_over_union_with_shift(boxA, boxB, shift_test):
+    """
+    Compute the Intersection over Union (IoU) between two bounding boxes in a 360 image, test two hypothesis each time : 
+    - boxA vs boxB
+    - boxA vs boxB + shift_test
+    - boxA vs boxB - shift_test
+    
+    And return the best IoU between the 3 hypotheses.
+
+    Args:
+        boxA (list): List containing the coordinates of the first bounding box in the format [xmin, ymin, xmax, ymax].
+        boxB (list): List containing the coordinates of the second bounding box in the format [xmin, ymin, xmax, ymax].
+        shift_test (int): Number of pixels to shift the second box.
+
+    Returns:
+        float: The best IoU between the two hypotheses.
+    """
+    boxB_shifted_plus = boxB.copy()
+    boxB_shifted_plus[0] = boxB[0] + shift_test
+    boxB_shifted_plus[2] = boxB[2] + shift_test
+    boxB_shifted_minus = boxB.copy()
+    boxB_shifted_minus[0] = boxB[0] - shift_test
+    boxB_shifted_minus[2] = boxB[2] - shift_test
+    return max(bb_intersection_over_union(boxA, boxB), bb_intersection_over_union(boxA, boxB_shifted_plus), bb_intersection_over_union(boxA, boxB_shifted_minus))
+
 
 def bb_intersection_over_union(boxA, boxB):
     """
@@ -209,21 +264,6 @@ def get_bounding_box_torch(mask):
     
     assert(mask.min() >= 0.0 and mask.max() <= 1.0), "Mask must be a binary mask"
     assert(mask.ndim == 2), "Mask must be a 2D tensor"
-    
-    # if erode_and_dilate_n_pixels > 0:
-    #     with torch.no_grad():
-    #         mask_start_positive = mask.sum()
-    #         mask = mask.unsqueeze(0).unsqueeze(0)
-    #         kernel = torch.ones((erode_and_dilate_n_pixels, erode_and_dilate_n_pixels))
-    #         kernel = kernel.unsqueeze(0).unsqueeze(0)
-    #         kernel = kernel.to(mask.device)
-    #         mask = torch.nn.functional.conv2d(mask, kernel, padding=erode_and_dilate_n_pixels//2)
-    #         mask = (mask > 0.0).float()
-    #         mask = torch.nn.functional.conv2d(mask, kernel, padding=erode_and_dilate_n_pixels//2)
-    #         mask = (mask == (erode_and_dilate_n_pixels**2)).float()
-    #         mask = mask.squeeze(0).squeeze(0)
-    #         mask_end_positive = mask.sum()
-    #         print(f"Erode and dilate {erode_and_dilate_n_pixels} pixels: {mask_start_positive} -> {mask_end_positive}")
 
     # get the bounding box of the mask
     ys, xs = torch.nonzero(mask, as_tuple=True)
@@ -268,7 +308,7 @@ def main(args, video_predictor: SAM2CameraPredictor):
     images_list = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(images_path)) for f in fn if (f.endswith(".jpg") or f.endswith(".jpeg") or f.endswith(".JPG") or f.endswith(".JPEG") or f.endswith(".png") or f.endswith(".PNG"))]
     images_list.sort()
     
-    images_list = images_list[200:300]
+    # images_list = images_list[300:350]
     
     assert(len(images_list) > 0), "No images found in the images path : {}".format(images_path)
     prInfo("Found {} images".format(len(images_list)))
@@ -472,15 +512,20 @@ def main(args, video_predictor: SAM2CameraPredictor):
                 matching_sam2_track_detection_idx = None
                 for detection_comp_idx, detection_comp in enumerate(sam2_detections_output[image_idx]["detections"]):
                     detection_comp_box = [detection_comp["xmin"], detection_comp["ymin"], detection_comp["xmax"], detection_comp["ymax"]]
-                    iou = bb_intersection_over_union(bbox_in_absolute_image, detection_comp_box)
+                    iou_boxes = bb_intersection_over_union_with_shift(bbox_in_absolute_image, detection_comp_box, shift_test=image.shape[1])
                     # prDebug(f"Comparing the detection generated from YOLO idx {yolo_detection_idx} with the SAM2 detection idx {detection_comp_idx} in the image {image_idx} => IoU = {np.round(iou, 2)}")
-                    if iou > 0.5:
-                        matching_sam2_track = detection_comp["track_id"]
-                        matching_sam2_track_detection_idx = detection_comp_idx
-                        break
+                    if iou_boxes > MIN_OVERLAP_IOU_BOXES:
+                        detection_comp_mask_rle = detection_comp["mask_rle"]
+                        detection_comp_mask = decode_RLE(detection_comp_mask_rle, shape = image.shape[:2])
+                        iou_masks = get_iou_torch(detection_comp_mask, full_image_mask)
+                        prop_of_mask_in_mask_comp = prop_of_mask1_in_mask2_torch(full_image_mask, detection_comp_mask)
+                        if iou_masks > MIN_OVERLAP_IOU_MASKS or prop_of_mask_in_mask_comp > MIN_MASK_IN_MASK_COMP_PROP:
+                            matching_sam2_track = detection_comp["track_id"]
+                            matching_sam2_track_detection_idx = detection_comp_idx
+                            break
                 
                 if matching_sam2_track is not None:
-                    prWarning(f"Matching SAM2 track {matching_sam2_track} (idx {matching_sam2_track_detection_idx}) found for detection : {yolo_detection_idx}, do not pursue tracking from this detection")
+                    prWarning(f"Matching SAM2 track {matching_sam2_track} (idx {matching_sam2_track_detection_idx}) found for detection : {yolo_detection_idx}, do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
                     continue
                 else:
                     prSuccess(f"No matching SAM2 track found for detection : {yolo_detection_idx}, pursuing tracking from this detection starting at image {image_idx}. Assigned SAM2 track ID {current_sam2_track_id}")
@@ -507,12 +552,9 @@ def main(args, video_predictor: SAM2CameraPredictor):
                     centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=11)
                     bbox_in_centered_image = get_bounding_box_torch(centered_image_mask)
                     if bbox_in_centered_image[0] is None:
-                        #empty mask
-                        # TODO : allow for some occlusion time
                         empty_mask_count += 1
-                        if empty_mask_count > 60:
+                        if empty_mask_count > MAX_OCCLUSION_FRAMES_COUNT:
                             empty_mask_count = 0
-                            # after 4 seconds of occlusion
                             prWarning(f"Empty mask for SAM2 track id {current_sam2_track_id} at image {following_image_idx}, stop the track")
                             break
                         else:
@@ -536,17 +578,20 @@ def main(args, video_predictor: SAM2CameraPredictor):
                     matching_sam2_track_detection_idx = None
                     for detection_comp_idx, detection_comp in enumerate(sam2_detections_output[following_image_idx]["detections"]):
                         detection_comp_box = [detection_comp["xmin"], detection_comp["ymin"], detection_comp["xmax"], detection_comp["ymax"]]
-                        iou = bb_intersection_over_union(bbox_in_absolute_image, detection_comp_box)
+                        iou_boxes = bb_intersection_over_union_with_shift(bbox_in_absolute_image, detection_comp_box, shift_test=following_image.shape[1])
                         # prDebug(f"Comparing the detection generated from SAM2 track id {current_sam2_track_id} with the SAM2 detection idx {detection_comp_idx} in the image {following_image_idx} => IoU = {np.round(iou, 2)}")
-                        if iou > 0.5:
-                            # TODO : also check masks
-                            # TODO : also check if fully enclosed
-                            matching_sam2_track = detection_comp["track_id"]
-                            matching_sam2_track_detection_idx = detection_comp_idx
-                            break
+                        if iou_boxes > MIN_OVERLAP_IOU_BOXES:
+                            detection_comp_mask_rle = detection_comp["mask_rle"]
+                            detection_comp_mask = decode_RLE(detection_comp_mask_rle, shape = following_image.shape[:2])
+                            iou_masks = get_iou_torch(detection_comp_mask, full_image_mask)
+                            prop_of_mask_in_mask_comp = prop_of_mask1_in_mask2_torch(full_image_mask, detection_comp_mask) # if we are fully enclosed in the compared mask, we break
+                            if iou_masks > MIN_OVERLAP_IOU_MASKS or prop_of_mask_in_mask_comp > MIN_MASK_IN_MASK_COMP_PROP:
+                                matching_sam2_track = detection_comp["track_id"]
+                                matching_sam2_track_detection_idx = detection_comp_idx
+                                break
                     
                     if matching_sam2_track is not None:
-                        prWarning(f"Matching SAM2 track {matching_sam2_track} (idx {matching_sam2_track_detection_idx}) found while tracking with SAM2 track id {current_sam2_track_id} at image {following_image_idx}, do not pursue tracking from this detection")
+                        prWarning(f"Matching SAM2 track {matching_sam2_track} (idx {matching_sam2_track_detection_idx}) found while tracking with SAM2 track id {current_sam2_track_id} at image {following_image_idx}, do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
                         break
          
                     # save the detection for the current sam2 track...
@@ -563,11 +608,14 @@ def main(args, video_predictor: SAM2CameraPredictor):
                     
                     # draw
                     image_centered_show = following_image_centered.copy()
-                    image_centered_show[centered_image_mask.cpu().numpy()] = [0, 0, 255]
-                    cv2.putText(image_centered_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (int(bbox_in_centered_image[0]), int(bbox_in_centered_image[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                    cv2.rectangle(image_centered_show, (int(bbox_in_centered_image[0]), int(bbox_in_centered_image[1])), (int(bbox_in_centered_image[2]), int(bbox_in_centered_image[3])), (0, 0, 255), 2)
+                    mask_image = image_centered_show.copy()
+                    mask_image[centered_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
+                    image_centered_show = cv2.addWeighted(image_centered_show, 0.5, mask_image, 0.5, 0)
+                    # image_centered_show[centered_image_mask.cpu().numpy()] = [0, 0, 255]
+                    cv2.putText(image_centered_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+                    cv2.rectangle(image_centered_show, (int(bbox_in_centered_image[0]), int(bbox_in_centered_image[1])), (int(bbox_in_centered_image[2]), int(bbox_in_centered_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
                     image_centered_show = cv2.cvtColor(image_centered_show, cv2.COLOR_BGR2RGB)
-                    image_centered_show = cv2.resize(image_centered_show, (960, 960))
+                    image_centered_show = cv2.resize(image_centered_show, (480, 480))
                     # image_centered_show = cv2.drawContours(image_centered_show, [mask.cpu().numpy().astype(np.uint8)], 0, (0, 0, 255), 2)
                     cv2.imshow("image_centered_show", image_centered_show)
                     key = cv2.waitKey(10)
@@ -576,17 +624,47 @@ def main(args, video_predictor: SAM2CameraPredictor):
                     
                     # draw full image
                     image_full_show = following_image.copy()
-                    image_full_show[full_image_mask.cpu().numpy()] = [0, 0, 255]
-                    cv2.putText(image_full_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                    cv2.rectangle(image_full_show, (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), (int(bbox_in_absolute_image[2]), int(bbox_in_absolute_image[3])), (0, 0, 255), 2)
+                    mask_image = image_full_show.copy()
+                    mask_image[full_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
+                    image_full_show = cv2.addWeighted(image_full_show, 0.5, mask_image, 0.5, 0)
+                    detections_in_image = sam2_detections_output[following_image_idx]["detections"]
+                    for detection in detections_in_image:
+                        color_detection = COLORS_SEQUENCE_BGR[detection["track_id"] % len(COLORS_SEQUENCE_BGR)]
+                        associated_mask = decode_RLE(detection["mask_rle"], shape = following_image.shape[:2])
+                        associated_mask_iou = get_iou_torch(associated_mask, full_image_mask)
+                        associated_mask_image = image_full_show.copy()
+                        associated_mask_image[associated_mask.cpu().numpy()] = color_detection
+                        image_full_show = cv2.addWeighted(image_full_show, 0.5, associated_mask_image, 0.5, 0)
+                        cv2.rectangle(image_full_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color_detection, 2)
+                        cv2.putText(image_full_show, "ID {} (iou = {:.2f}%)".format(detection["track_id"], associated_mask_iou * 100), (int(detection["xmin"]), int(detection["ymin"]-20)), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color_detection, 2)
+                    # image_full_show[full_image_mask.cpu().numpy()] = [0, 0, 255]
+                    cv2.putText(image_full_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+                    cv2.rectangle(image_full_show, (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), (int(bbox_in_absolute_image[2]), int(bbox_in_absolute_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
                     image_full_show = cv2.cvtColor(image_full_show, cv2.COLOR_BGR2RGB)
-                    image_full_show = cv2.resize(image_full_show, (1920, 960))
+                                        
+                    track_save_debug_dir = os.path.join(args.dir, "track_debug", "track_{:06d}".format(current_sam2_track_id))
+                    if not os.path.isdir(track_save_debug_dir):
+                        os.makedirs(track_save_debug_dir)
+                    cv2.imwrite(os.path.join(track_save_debug_dir, f"image_full_{following_image_idx:06d}.jpg"), image_full_show)
+                    
+                    image_full_show = cv2.resize(image_full_show, (960, 480))
                     cv2.imshow("image_full_show", image_full_show)
                     key = cv2.waitKey(10)
                     if key == ord('q') or key == 27:
                         exit(0)
                                     
                 current_sam2_track_id += 1
+    
+    sam2_detections_output_list = []
+    for image_idx, image_detections in sam2_detections_output.items():
+        for det in image_detections["detections"]:
+            det["mask_rle"] = det["mask_rle"].cpu().numpy().tolist()
+        sam2_detections_output_list.append(image_detections)
+    
+    write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "sam2_detections_360.json"))
+    
+    assert(len(sam2_detections_output_list) == len(images_list)), "Number of detections and images should be the same"
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
