@@ -29,16 +29,25 @@ def main(args, episode: str):
         episode (str): episode to process
     """
     
-
-    intersection_mask = cv2.imread(args.intersection_mask_path)
-    intersection_mask = cv2.cvtColor(intersection_mask, cv2.COLOR_BGR2GRAY)
-    intersection_mask = np.array(intersection_mask>128)
-    intersection_mask = torch.from_numpy(intersection_mask) # Tensor of shape [H, W], dtype is torch.bool
+    interact_zone_tracking_path = os.path.join(args.dir, "episodes", episode, "interact_zone_tracking_360.json")
+    if os.path.exists(interact_zone_tracking_path):
+        prInfo(f"Interact zone tracking file {interact_zone_tracking_path} exists using it to get a different mask for each frame. Ignoring the default or specified mask ({args.intersection_mask_path})")
+        interact_zone_tracking_dict = read_json_to_dic(interact_zone_tracking_path) # list of detection of type : [{"image_file": "image_file.jpg", "detections": [{"track_id": 1, "xmin": 10, "ymin": 10, "xmax": 100, "ymax": 100, "mask_rle": "mask_rle"}, ...]}, ...]
+        intersection_mask = None
+    else:
+        prInfo(f"Interact zone tracking file {interact_zone_tracking_path} does not exist using the default or specified mask ({args.intersection_mask_path}) for all frames")
+        interact_zone_tracking_dict = None
+        intersection_mask = cv2.imread(args.intersection_mask_path)
+        intersection_mask = cv2.cvtColor(intersection_mask, cv2.COLOR_BGR2GRAY)
+        intersection_mask = np.array(intersection_mask>128)
+        intersection_mask = torch.from_numpy(intersection_mask) # Tensor of shape [H, W], dtype is torch.bool
     
     image_dir = os.path.join(args.dir, "episodes", episode, "images_360")
     image_files = os.listdir(image_dir)
     image_files = [os.path.join(image_dir, f) for f in image_files if f.endswith(".jpg")]
     image_files.sort()
+    
+    width, height = cv2.imread(image_files[0]).shape[:2]
     
     detections_path = os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json")
     if not os.path.exists(detections_path):
@@ -54,8 +63,14 @@ def main(args, episode: str):
     for image_idx, image_detections in tqdm(enumerate(detections_dict), total=len(detections_dict), desc="Processing detections"):
         for det_idx, det in enumerate(image_detections["detections"]):
             mask_rle = np.array(det["mask_rle"]).astype(np.int32)
-            mask = decode_RLE(torch.from_numpy(mask_rle), shape = intersection_mask.shape[:2])
-            intersection_sum = torch.sum(intersection_mask & mask)
+            mask = decode_RLE(torch.from_numpy(mask_rle), shape = (height, width))
+            if intersection_mask is not None:
+                intersection_sum = torch.sum(intersection_mask & mask)
+            else:
+                compared_mask_rle = interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"]
+                compared_mask = decode_RLE(torch.from_numpy(compared_mask_rle), shape = (height, width))
+                intersection_sum = torch.sum(compared_mask & mask)
+                
             if intersection_sum > MIN_PIXELS_INTERSECTION:
                 det["engagement_level"] = 3
             else:
