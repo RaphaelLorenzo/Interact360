@@ -803,7 +803,7 @@ if __name__ == "__main__":
     parser.add_argument("--yolo_confidence_threshold", "-yct", type=float, default=0.7, help="YOLO confidence threshold")
     parser.add_argument("--yolo_batch_size", "-ybs", type=int, default=16, help="Batch size for the YOLO detection")
     parser.add_argument("--vos_optimized", "-vos", action="store_true", default=False, help="Use the VOS optimized model")
-    parser.add_argument("--display", "-d", action="store_true", default=False, help="Display the detections live")
+    parser.add_argument("--display", "-disp", action="store_true", default=False, help="Display the detections live")
     # parser.add_argument("--ngpu", "-ngpu", type=int, default=0, help="Number of GPUs to use, default 0 means use all GPUs")
     args = parser.parse_args()
 
