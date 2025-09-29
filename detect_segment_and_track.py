@@ -896,9 +896,9 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
     
     # Write the detections to a JSON file
     if args.interact_zone_tracking != "":
-        write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json"))
-    else:
         write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "interact_zone_tracking_360.json"))
+    else:
+        write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json"))
         
     assert(len(sam2_detections_output_list) == len(images_list)), "Number of detections and images should be the same"
     
