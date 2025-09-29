@@ -3,4 +3,4 @@
 __pycache__/
 checkpoints/sam2.1_hiera_tiny.pt
 *.pt
-demo/output/2025_06_13_11_15_31_Theta360/sam2_detections_360.json
+demo/output/*

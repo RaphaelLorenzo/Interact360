@@ -34,11 +34,12 @@ from misc.rle_tools import decode_RLE
 MIN_PIXELS_INTERSECTION = 1000
 
 
-def main(args):
+def main(args, episode: str):
     """ Main function to get the engagement levels for the tracks
 
     Args:
         args (argparse.Namespace): arguments from the command line
+        episode (str): episode to process
     """
     
 
@@ -47,12 +48,12 @@ def main(args):
     intersection_mask = np.array(intersection_mask>128)
     intersection_mask = torch.from_numpy(intersection_mask) # Tensor of shape [H, W], dtype is torch.bool
     
-    image_dir = os.path.join(args.dir, "images_360")
+    image_dir = os.path.join(args.dir, "episodes", episode, "images_360")
     image_files = os.listdir(image_dir)
     image_files = [os.path.join(image_dir, f) for f in image_files if f.endswith(".jpg")]
     image_files.sort()
     
-    detections_path = os.path.join(args.dir, "sam2_detections_360.json")
+    detections_path = os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json")
     if not os.path.exists(detections_path):
         raise ValueError("Detection file {} does not exist".format(detections_path))
     
@@ -80,12 +81,22 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360")
+    parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all'")
     parser.add_argument("--intersection_mask_path", "-imp", type=str, default="./assets/default_mask_intersection_zone.png")
     args = parser.parse_args()
     
     assert os.path.isdir(args.dir), "Directory should exist at {}".format(args.dir)
     assert os.path.isfile(args.intersection_mask_path), "Intersection mask path should exist at {}".format(args.intersection_mask_path)
 
+    # List of episodes to process
+    if args.episodes == "all":
+        episodes_list = ["{:04d}".format(int(x)) for x in os.listdir(os.path.join(args.dir, "episodes"))]
+    else:
+        episodes_list = ["{:04d}".format(int(x)) for x in args.episodes.split(",")]
+
+    episodes_list.sort()
+    
     prInfo("Auto labelling : {}".format(os.path.basename(args.dir)))
     
-    main(args)
+    for episode in episodes_list:
+        main(args, episode)

@@ -385,10 +385,10 @@ def filter_isolated_detections(detections, window_size = 5, min_element_in_windo
 
     return detections
 
-def main(args, video_predictor: SAM2CameraPredictor):
+def main(args, video_predictor: SAM2CameraPredictor, episode: str):
 
     # Load image list
-    images_path = os.path.join(args.dir, "images_360")
+    images_path = os.path.join(args.dir, "episodes", episode, "images_360")
     images_list = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(images_path)) for f in fn if (f.endswith(".jpg") or f.endswith(".jpeg") or f.endswith(".JPG") or f.endswith(".JPEG") or f.endswith(".png") or f.endswith(".PNG"))]
     images_list.sort()
     
@@ -765,7 +765,7 @@ def main(args, video_predictor: SAM2CameraPredictor):
                         cv2.rectangle(image_full_show, (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), (int(bbox_in_absolute_image[2]), int(bbox_in_absolute_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
                         image_full_show = cv2.cvtColor(image_full_show, cv2.COLOR_BGR2RGB)
                                             
-                        track_save_debug_dir = os.path.join(args.dir, "track_debug", "track_{:06d}".format(current_sam2_track_id))
+                        track_save_debug_dir = os.path.join(args.dir, "episodes", episode, "track_debug", "track_{:06d}".format(current_sam2_track_id))
                         if not os.path.isdir(track_save_debug_dir):
                             os.makedirs(track_save_debug_dir)
                         cv2.imwrite(os.path.join(track_save_debug_dir, f"image_full_{following_image_idx:06d}.jpg"), image_full_show)
@@ -790,7 +790,7 @@ def main(args, video_predictor: SAM2CameraPredictor):
     sam2_detections_output_list = filter_isolated_detections(sam2_detections_output_list)
     
     # Write the detections to a JSON file
-    write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "sam2_detections_360.json"))
+    write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json"))
     
     assert(len(sam2_detections_output_list) == len(images_list)), "Number of detections and images should be the same"
     
@@ -798,6 +798,7 @@ def main(args, video_predictor: SAM2CameraPredictor):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360")
+    parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all'")
     parser.add_argument("--sam2_model", "-sm", type=str, default="tiny", help="SAM2 model to use (tiny, small, base, large)")
     parser.add_argument("--yolo_model_size", "-ys", type=str, default="x", help="YOLO model size to use (n, s, l, x)")
     parser.add_argument("--yolo_confidence_threshold", "-yct", type=float, default=0.7, help="YOLO confidence threshold")
@@ -821,6 +822,16 @@ if __name__ == "__main__":
     assert os.path.isfile(sam2_checkpoint), "Checkpoint should exist : {}".format(sam2_checkpoint)
     assert os.path.isfile(os.path.join(here, "sam2",sam2_cfg)), "SAM2 config should exist : {}".format(sam2_cfg)
 
+    # List of episodes to process
+    if args.episodes == "all":
+        episodes_list = ["{:04d}".format(int(x)) for x in os.listdir(os.path.join(args.dir, "episodes"))]
+    else:
+        episodes_list = ["{:04d}".format(int(x)) for x in args.episodes.split(",")]
+
+    episodes_list.sort()
+
     video_predictor = build_sam2_camera_predictor(sam2_cfg, sam2_checkpoint, device=torch.device("cuda", index=0), vos_optimized=args.vos_optimized)
     prSuccess("SAM2 model built successfully!")
-    main(args, video_predictor)
+    
+    for episode in episodes_list:
+        main(args, video_predictor, episode)

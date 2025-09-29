@@ -56,7 +56,7 @@ def main(args):
     prInfo(f"Video name: {video_name}")
     prInfo(f"Video extension: {video_extension}")
     
-    output_path = os.path.join(args.save_dir, video_name, "images_360")
+    output_path = os.path.join(args.save_dir, video_name, "episodes", "0000", "images_360")
     if not os.path.exists(output_path):
         os.makedirs(output_path)
         prSuccess(f"Output path {output_path} created")
