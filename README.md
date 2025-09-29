@@ -37,14 +37,14 @@ Where `-izt 2688,1042,4585,1919` is the bounding box of the interaction zone in 
 
 
 ```
-python extract_images.py -v ./demo/data/2025_06_13_11_15_31_Theta360.mkv
-python detect_segment_and_track.py -d ./demo/output/2025_06_13_11_15_31_Theta360
-python detect_interactions.py -d ./demo/output/2025_06_13_11_15_31_Theta360
+python ./process/extract_images.py -v ./demo/data/2025_06_13_11_15_31_Theta360.mkv
+python ./process/detect_segment_and_track.py -d ./demo/output/2025_06_13_11_15_31_Theta360
+python ./process/detect_interactions.py -d ./demo/output/2025_06_13_11_15_31_Theta360
 ```
 
 Then you can see the result in the visualizer !
 ```
-python extract_images.py -d ./demo/output
+python visualize.py -d ./demo/output
 ```
 
 ## Acknoledgment 
