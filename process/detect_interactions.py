@@ -67,7 +67,7 @@ def main(args, episode: str):
             if intersection_mask is not None:
                 intersection_sum = torch.sum(intersection_mask & mask)
             else:
-                compared_mask_rle = interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"]
+                compared_mask_rle = np.array(interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"]).astype(np.int32)
                 compared_mask = decode_RLE(torch.from_numpy(compared_mask_rle), shape = (height, width))
                 intersection_sum = torch.sum(compared_mask & mask)
                 
