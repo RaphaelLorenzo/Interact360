@@ -125,6 +125,10 @@ def main(args):
     
     prSuccess(f"Completed moving all {image_index} images to {output_path}")
     
+    # remove splitted videos
+    shutil.rmtree(output_path_splitted_videos)
+    prSuccess(f"Removed temporary splitted videos directory {output_path_splitted_videos}")
+    
     return
     
 if __name__ == "__main__":
