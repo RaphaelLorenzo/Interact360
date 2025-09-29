@@ -16,6 +16,8 @@ pip install -r requirements.txt
 
 ## Run
 
+Place your video under `./demo/data` (or use `-v` to change the input video path and `-s` for the ouput saving path, then the appropriate `-d` to run outside of the directory)
+
 From a video run these 3 commands to extract images, detect segment and track people inside, and assess if they are interacting (by default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs)
 
 ```

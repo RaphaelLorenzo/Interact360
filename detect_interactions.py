@@ -18,7 +18,7 @@ from misc.other_utils import *
 from misc.rle_tools import decode_RLE
 
 
-MIN_PIXELS_INTERSECTION = 1000
+MIN_PIXELS_INTERSECTION = 10000
 
 
 def main(args, episode: str):
