@@ -6,6 +6,7 @@ from tqdm import tqdm
 from PIL import Image
 import numpy as np
 import cv2
+import socket
 
 from ultralytics import YOLO
 
@@ -875,11 +876,13 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                             os.makedirs(track_save_debug_dir)
                         cv2.imwrite(os.path.join(track_save_debug_dir, f"image_full_{following_image_idx:06d}.jpg"), image_full_show)
                         
-                        image_full_show = cv2.resize(image_full_show, (960, 480))
-                        cv2.imshow("image_full_show", image_full_show)
-                        key = cv2.waitKey(10)
-                        if key == ord('q') or key == 27:
-                            exit(0)
+                        hostname = socket.gethostname()
+                        if "raphael" in hostname:
+                            image_full_show = cv2.resize(image_full_show, (960, 480))
+                            cv2.imshow("image_full_show", image_full_show)
+                            key = cv2.waitKey(10)
+                            if key == ord('q') or key == 27:
+                                exit(0)
                 
                 # Increment the current SAM2 track id before next tracking
                 current_sam2_track_id += 1
