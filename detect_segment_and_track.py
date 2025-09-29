@@ -846,10 +846,12 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                         cv2.rectangle(image_centered_show, (int(bbox_in_centered_image[0]), int(bbox_in_centered_image[1])), (int(bbox_in_centered_image[2]), int(bbox_in_centered_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
                         image_centered_show = cv2.cvtColor(image_centered_show, cv2.COLOR_BGR2RGB)
                         image_centered_show = cv2.resize(image_centered_show, (480, 480))
-                        cv2.imshow("image_centered_show", image_centered_show)
-                        key = cv2.waitKey(10)
-                        if key == ord('q') or key == 27:
-                            exit(0)
+                        hostname = socket.gethostname()
+                        if "raphael" in hostname:
+                            cv2.imshow("image_centered_show", image_centered_show)
+                            key = cv2.waitKey(10)
+                            if key == ord('q') or key == 27:
+                                exit(0)
                         
                         # draw full image
                         image_full_show = following_image.copy()
