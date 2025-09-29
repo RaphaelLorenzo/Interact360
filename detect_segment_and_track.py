@@ -640,6 +640,7 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                                                                         "ymin": bbox_in_absolute_image[1],
                                                                         "xmax": bbox_in_absolute_image[2],
                                                                         "ymax": bbox_in_absolute_image[3],
+                                                                        "validity": "valid",
                                                                         "mask_rle": full_image_mask_rle})
                 
                 # ... if it did not match, iterate on all the following images and keep checking if it does not match with any existing detection, otherwise save as new elements of the track ...
@@ -723,6 +724,7 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                                                                                         "ymin": bbox_in_absolute_image[1],
                                                                                         "xmax": bbox_in_absolute_image[2],
                                                                                         "ymax": bbox_in_absolute_image[3],
+                                                                                        "validity": "valid",
                                                                                         "mask_rle": full_image_mask_rle})
                     
                     # prDebug(f"[{following_image_idx}][{current_sam2_track_id}] Box : [{int(bbox_in_absolute_image[0])}, {int(bbox_in_absolute_image[1])}, {int(bbox_in_absolute_image[2])}, {int(bbox_in_absolute_image[3])}]")
