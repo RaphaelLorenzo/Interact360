@@ -10,23 +10,23 @@ import socket
 
 from ultralytics import YOLO
 
-from sam2.build_sam import build_sam2_camera_predictor
-from sam2.sam2_camera_predictor import SAM2CameraPredictor
-
 here = os.path.dirname(__file__)
 sys.path.append(os.path.join(here, '../'))
 sys.path.append(os.path.join(here))
+
+from sam2.build_sam import build_sam2_camera_predictor
+from sam2.sam2_camera_predictor import SAM2CameraPredictor
 
 from misc.print_utils import *
 from misc.other_utils import *
 from misc.rle_tools import encode_RLE, decode_RLE
 
 SAM2_MODEL_TO_CHECKPOINT = {
-    "tiny": os.path.join(here, "checkpoints/sam2.1_hiera_tiny.pt"),
-    "tiny_512": os.path.join(here, "checkpoints/sam2.1_hiera_tiny.pt"),
-    "small": os.path.join(here, "checkpoints/sam2.1_hiera_small.pt"),
-    "base": os.path.join(here, "checkpoints/sam2.1_hiera_base_plus.pt"),
-    "large": os.path.join(here, "checkpoints/sam2.1_hiera_large.pt")
+    "tiny": os.path.join(here, "../", "checkpoints/sam2.1_hiera_tiny.pt"),
+    "tiny_512": os.path.join(here, "../", "checkpoints/sam2.1_hiera_tiny.pt"),
+    "small": os.path.join(here, "../", "checkpoints/sam2.1_hiera_small.pt"),
+    "base": os.path.join(here, "../", "checkpoints/sam2.1_hiera_base_plus.pt"),
+    "large": os.path.join(here, "../", "checkpoints/sam2.1_hiera_large.pt")
 }
 
 SAM2_MODEL_TO_CFG = {
@@ -930,7 +930,7 @@ if __name__ == "__main__":
     sam2_cfg = SAM2_MODEL_TO_CFG[args.sam2_model]
     
     assert os.path.isfile(sam2_checkpoint), "Checkpoint should exist : {}".format(sam2_checkpoint)
-    assert os.path.isfile(os.path.join(here, "sam2",sam2_cfg)), "SAM2 config should exist : {}".format(sam2_cfg)
+    # assert os.path.isfile(os.path.join(here, "sam2",sam2_cfg)), "SAM2 config should exist : {}".format(sam2_cfg)
 
     # List of episodes to process
     if args.episodes == "all":
