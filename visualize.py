@@ -718,6 +718,11 @@ class Interact360Visualizer(QMainWindow):
             self.update_track_list()
             self.update_plots()
             
+            # Update interaction UI availability
+            has_interaction_data = (self.interaction_mask is not None or self.interact_zone_tracking is not None)
+            self.show_interaction_highlights_cb.setEnabled(has_interaction_data)
+            self.show_interaction_zone_cb.setEnabled(has_interaction_data)
+            
             status_msg = f"Loaded episode {session}/{episode} - {len(self.image_files)} frames, {len(self.detections)} detection frames"
             self.statusBar().showMessage(status_msg)
             prInfo(status_msg)
@@ -823,25 +828,21 @@ class Interact360Visualizer(QMainWindow):
         
         return total_positive
     
-    def get_mask_intersection_with_interaction_zone(self, mask_rle, image_shape):
+    def get_mask_intersection_with_interaction_zone(self, mask_rle, image_shape, frame_index=None):
         """Get the intersection of a track mask with the interaction zone"""
-        if self.interaction_mask is None:
+        # Get the appropriate interaction mask for this frame
+        if frame_index is not None:
+            interaction_mask_resized = self.get_interaction_mask_for_frame(frame_index, image_shape)
+        else:
+            interaction_mask_resized = self.get_static_interaction_mask(image_shape)
+            
+        if interaction_mask_resized is None:
             return None
         
         try:
             # Decode the mask
             mask = decode_RLE(mask_rle, image_shape)
             mask_np = mask.cpu().numpy().astype(bool)
-            
-            # Resize interaction mask to match image size if needed
-            if self.interaction_mask.shape != image_shape:
-                interaction_mask_resized = cv2.resize(
-                    self.interaction_mask.astype(np.uint8), 
-                    (image_shape[1], image_shape[0]), 
-                    interpolation=cv2.INTER_NEAREST
-                ).astype(bool)
-            else:
-                interaction_mask_resized = self.interaction_mask
             
             # Find intersection
             intersection = mask_np & interaction_mask_resized
@@ -850,6 +851,46 @@ class Interact360Visualizer(QMainWindow):
         except Exception as e:
             prWarning(f"Failed to compute mask intersection: {e}")
             return None
+    
+    def get_interaction_mask_for_frame(self, frame_index, image_shape):
+        """Get the interaction mask for a specific frame (dynamic or static)"""
+        if self.interact_zone_tracking is not None:
+            # Use dynamic interaction zone tracking
+            if frame_index < len(self.interact_zone_tracking):
+                try:
+                    interact_zone_entry = self.interact_zone_tracking[frame_index]
+                    if "detections" in interact_zone_entry and len(interact_zone_entry["detections"]) > 0:
+                        # Get the first detection as interaction zone mask
+                        interaction_det = interact_zone_entry["detections"][0]
+                        if "mask_rle" in interaction_det:
+                            mask_rle = torch.tensor(interaction_det["mask_rle"], dtype=torch.int32)
+                            mask = decode_RLE(mask_rle, image_shape)
+                            return mask.cpu().numpy().astype(bool)
+                except Exception as e:
+                    prWarning(f"Failed to load dynamic interaction mask for frame {frame_index}: {e}")
+                    
+            # Fallback to static mask if dynamic fails or not available
+            return self.get_static_interaction_mask(image_shape)
+        else:
+            # Use static interaction mask
+            return self.get_static_interaction_mask(image_shape)
+    
+    def get_static_interaction_mask(self, image_shape):
+        """Get the static interaction mask resized to image shape"""
+        if self.interaction_mask is None:
+            return None
+            
+        # Resize interaction mask to match image size if needed
+        if self.interaction_mask.shape != image_shape:
+            interaction_mask_resized = cv2.resize(
+                self.interaction_mask.astype(np.uint8), 
+                (image_shape[1], image_shape[0]), 
+                interpolation=cv2.INTER_NEAREST
+            ).astype(bool)
+        else:
+            interaction_mask_resized = self.interaction_mask
+            
+        return interaction_mask_resized
     
     def update_slider(self):
         """Update slider range based on loaded data"""
@@ -922,6 +963,23 @@ class Interact360Visualizer(QMainWindow):
         image_copy = image.copy()
         image_height, image_width = image.shape[:2]
         
+        # Draw interaction zone as background overlay if enabled
+        if self.show_interaction_zone:
+            interaction_mask = self.get_interaction_mask_for_frame(self.current_frame, (image_height, image_width))
+            if interaction_mask is not None:
+                # Create semi-transparent overlay for interaction zone
+                zone_color = (255, 255, 0)  # Yellow for interaction zone
+                overlay = image_copy.copy()
+                overlay[interaction_mask] = zone_color
+                alpha = 0.2  # 20% opacity for zone display
+                image_copy = cv2.addWeighted(image_copy, 1.0-alpha, overlay, alpha, 0)
+                
+                # Add contour around interaction zone
+                zone_uint8 = interaction_mask.astype(np.uint8)
+                contours, _ = cv2.findContours(zone_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    cv2.drawContours(image_copy, contours, -1, zone_color, 2)
+        
         for det in detections:
             track_id = det.get("track_id", -1)
             engagement_level = det.get("engagement_level", det.get("engagement_level_auto", -1))
@@ -978,7 +1036,7 @@ class Interact360Visualizer(QMainWindow):
                 try:
                     mask_rle = torch.tensor(det["mask_rle"], dtype=torch.int32)
                     intersection = self.get_mask_intersection_with_interaction_zone(
-                        mask_rle, (image_height, image_width))
+                        mask_rle, (image_height, image_width), self.current_frame)
                     
                     if intersection is not None and intersection.any():
                         # Create a bright highlight overlay for interaction areas
@@ -1166,6 +1224,10 @@ class Interact360Visualizer(QMainWindow):
     
     def toggle_show_interaction_highlights(self, checked):
         self.show_interaction_highlights = checked
+        self.update_image_display()
+    
+    def toggle_show_interaction_zone(self, checked):
+        self.show_interaction_zone = checked
         self.update_image_display()
 
 
