@@ -392,7 +392,7 @@ def main(args, video_predictor: SAM2CameraPredictor):
     images_list = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(images_path)) for f in fn if (f.endswith(".jpg") or f.endswith(".jpeg") or f.endswith(".JPG") or f.endswith(".JPEG") or f.endswith(".png") or f.endswith(".PNG"))]
     images_list.sort()
     
-    images_list = images_list[300:550]
+    # images_list = images_list[300:550]
     
     assert(len(images_list) > 0), "No images found in the images path : {}".format(images_path)
     prInfo("Found {} images".format(len(images_list)))
@@ -729,7 +729,7 @@ def main(args, video_predictor: SAM2CameraPredictor):
                     # prDebug(f"Mask shape : {centered_image_mask.shape}, image centered shape : {following_image_centered.shape}")
                     
                     
-                    if True:
+                    if args.display:
                         # draw centered image
                         image_centered_show = following_image_centered.copy()
                         mask_image = image_centered_show.copy()
@@ -803,6 +803,7 @@ if __name__ == "__main__":
     parser.add_argument("--yolo_confidence_threshold", "-yct", type=float, default=0.7, help="YOLO confidence threshold")
     parser.add_argument("--yolo_batch_size", "-ybs", type=int, default=16, help="Batch size for the YOLO detection")
     parser.add_argument("--vos_optimized", "-vos", action="store_true", default=False, help="Use the VOS optimized model")
+    parser.add_argument("--display", "-d", action="store_true", default=False, help="Display the detections live")
     # parser.add_argument("--ngpu", "-ngpu", type=int, default=0, help="Number of GPUs to use, default 0 means use all GPUs")
     args = parser.parse_args()
 
