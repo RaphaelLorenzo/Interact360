@@ -1,5 +1,8 @@
 # Interact360
 
+![cafet](./illustrations/cafet.gif)
+![ssup](./illustrations/ssup.png)
+
 ## Install
 - Install `ffmpeg` if you dont have it already (for video extraction)
 ```
