@@ -815,9 +815,6 @@ if __name__ == "__main__":
     prInfo("Using SAM2 model : {}".format(args.sam2_model))
     prInfo("Using YOLO model size : {}".format(args.yolo_model_size))
     
-    images_path = os.path.join(args.dir, "images_360")
-    assert os.path.isdir(images_path), "Directory should exist : {}".format(images_path)
-
     sam2_checkpoint = SAM2_MODEL_TO_CHECKPOINT[args.sam2_model]
     sam2_cfg = SAM2_MODEL_TO_CFG[args.sam2_model]
     
@@ -831,6 +828,10 @@ if __name__ == "__main__":
         episodes_list = ["{:04d}".format(int(x)) for x in args.episodes.split(",")]
 
     episodes_list.sort()
+
+    for episode in episodes_list:
+        images_path = os.path.join(args.dir, "episodes", episode, "images_360")
+        assert os.path.isdir(images_path), "Directory should exist : {}".format(images_path)
 
     video_predictor = build_sam2_camera_predictor(sam2_cfg, sam2_checkpoint, device=torch.device("cuda", index=0), vos_optimized=args.vos_optimized)
     prSuccess("SAM2 model built successfully!")
