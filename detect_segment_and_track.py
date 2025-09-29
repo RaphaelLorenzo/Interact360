@@ -460,7 +460,6 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
     images_list = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(images_path)) for f in fn if (f.endswith(".jpg") or f.endswith(".jpeg") or f.endswith(".JPG") or f.endswith(".JPEG") or f.endswith(".png") or f.endswith(".PNG"))]
     images_list.sort()
     
-    images_list = images_list[::4]
     # images_list = images_list[300:550]
     
     assert(len(images_list) > 0), "No images found in the images path : {}".format(images_path)

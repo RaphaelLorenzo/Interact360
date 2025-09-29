@@ -324,6 +324,7 @@ class Interact360Visualizer(QMainWindow):
         
         # Interaction mask
         self.interaction_mask = None
+        self.interact_zone_tracking = None  # Dynamic interaction zones per frame
         self.load_interaction_mask()
         
         # Display options
@@ -331,6 +332,7 @@ class Interact360Visualizer(QMainWindow):
         self.show_boxes = True
         self.show_track_ids = True
         self.show_interaction_highlights = True
+        self.show_interaction_zone = False  # Option to constantly display interaction zone
         self.mask_opacity = 30  # Default 30% opacity
         
         # Plot time windows
@@ -404,6 +406,24 @@ class Interact360Visualizer(QMainWindow):
         else:
             prWarning(f"Interaction mask not found: {interaction_mask_path}")
             self.interaction_mask = None
+    
+    def load_interact_zone_tracking(self, episode_dir):
+        """Load dynamic interaction zone tracking if available"""
+        interact_zone_tracking_path = os.path.join(episode_dir, "interact_zone_tracking_360.json")
+        
+        if os.path.exists(interact_zone_tracking_path):
+            try:
+                self.interact_zone_tracking = read_json_to_dic(interact_zone_tracking_path)
+                prInfo(f"Loaded interact zone tracking: {interact_zone_tracking_path} with {len(self.interact_zone_tracking)} frames")
+                return True
+            except Exception as e:
+                prError(f"Error loading interact zone tracking: {e}")
+                self.interact_zone_tracking = None
+                return False
+        else:
+            prInfo(f"No interact zone tracking file found: {interact_zone_tracking_path}")
+            self.interact_zone_tracking = None
+            return False
     
     def get_track_color(self, track_id):
         """Get the color for a specific track ID"""
@@ -524,6 +544,12 @@ class Interact360Visualizer(QMainWindow):
         self.show_interaction_highlights_cb.toggled.connect(self.toggle_show_interaction_highlights)
         options_layout.addWidget(self.show_interaction_highlights_cb)
         
+        self.show_interaction_zone_cb = QCheckBox("Show Interaction Zone [Z]")
+        self.show_interaction_zone_cb.setChecked(False)
+        self.show_interaction_zone_cb.setEnabled(self.interaction_mask is not None)
+        self.show_interaction_zone_cb.toggled.connect(self.toggle_show_interaction_zone)
+        options_layout.addWidget(self.show_interaction_zone_cb)
+        
         # Mask opacity control
         mask_opacity_layout = QHBoxLayout()
         mask_opacity_layout.addWidget(QLabel("Mask Opacity:"))
@@ -642,6 +668,7 @@ class Interact360Visualizer(QMainWindow):
         QShortcut(QKeySequence("B"), self, lambda: self.show_boxes_cb.setChecked(not self.show_boxes_cb.isChecked()))
         QShortcut(QKeySequence("T"), self, lambda: self.show_track_ids_cb.setChecked(not self.show_track_ids_cb.isChecked()))
         QShortcut(QKeySequence("I"), self, lambda: self.show_interaction_highlights_cb.setChecked(not self.show_interaction_highlights_cb.isChecked()))
+        QShortcut(QKeySequence("Z"), self, lambda: self.show_interaction_zone_cb.setChecked(not self.show_interaction_zone_cb.isChecked()))
         
         # Track selection
         QShortcut(QKeySequence("Escape"), self, self.clear_track_selection)
@@ -680,6 +707,9 @@ class Interact360Visualizer(QMainWindow):
                 self.track_engagement_data = {}
                 self.track_mask_size_data = {}
                 prWarning(f"No detection file found: {detection_file}")
+            
+            # Load interact zone tracking if available
+            self.load_interact_zone_tracking(episode_dir)
             
             # Update UI
             self.update_slider()
