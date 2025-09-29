@@ -4,3 +4,4 @@ __pycache__/
 checkpoints/sam2.1_hiera_tiny.pt
 *.pt
 demo/output/*
+demo/data/SSUP_SAMPLE_0.mp4

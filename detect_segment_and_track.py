@@ -95,6 +95,49 @@ def bb_intersection_over_union_with_shift(boxA, boxB, shift_test):
     boxB_shifted_minus[2] = boxB[2] - shift_test
     return max(bb_intersection_over_union(boxA, boxB), bb_intersection_over_union(boxA, boxB_shifted_plus), bb_intersection_over_union(boxA, boxB_shifted_minus))
 
+def get_convex_hull_mask(mask: torch.Tensor) -> torch.Tensor:
+    """
+    Get the convex hull of a mask.
+
+    Args:
+        mask (torch.Tensor): Mask to get the convex hull of, must be a boolean tensor. Shape is (H,W)
+
+    Returns:
+        torch.Tensor: Convex hull mask, same shape and device as input mask, dtype is torch.bool
+    """
+    assert mask.dtype == torch.bool, f"Mask must be a boolean tensor got {mask.dtype}"
+    assert mask.ndim == 2, f"Mask must be a 2D tensor got {mask.ndim}"
+
+    # import numpy as np
+    # import cv2
+
+    # Convert mask to numpy uint8
+    mask_np = mask.cpu().numpy().astype(np.uint8) * 255
+
+    # Find contours
+    contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours or len(contours) == 0:
+        # No foreground, return all False
+        return torch.zeros_like(mask)
+
+    # Concatenate all points from all contours
+    all_points = np.concatenate(contours, axis=0)
+
+    # Compute convex hull
+    hull = cv2.convexHull(all_points)
+
+    # Create empty mask
+    hull_mask_np = np.zeros_like(mask_np, dtype=np.uint8)
+
+    # Fill convex hull
+    cv2.fillConvexPoly(hull_mask_np, hull, 1)
+
+    # Convert back to torch.bool and to original device
+    hull_mask = torch.from_numpy(hull_mask_np.astype(bool)).to(mask.device)
+
+    return hull_mask
+
 
 def bb_intersection_over_union(boxA, boxB):
     """
@@ -224,7 +267,36 @@ def get_image_centered_on_detection(image : np.ndarray, detection_box : list, pr
     else:
         raise ValueError(f"Invalid projection type : {projection_type}")
     
+def erode_mask(mask : torch.Tensor, erode_n_pixels : int = 0) -> torch.Tensor:
+    """ Perform erosion and dilation on a mask to remove islands and fill holes.
 
+    Args:
+        mask (torch.Tensor): Mask to erode and dilate, must be a mask of torch.bool. Shape is (H,W)
+        erode_and_dilate_n_pixels (int, optional): Number of pixels to erode and dilate the mask. Defaults to 0.
+
+    Returns:
+        torch.Tensor: Eroded and dilated mask, same shape and device as input mask, dtype is torch.bool
+    """
+    assert(mask.dtype == torch.bool), "Mask must be a boolean tensor got {}".format(mask.dtype)
+    mask = mask.float() # convert to float here for conv2d
+    
+    assert(mask.min() >= 0.0 and mask.max() <= 1.0), "Mask must be a binary mask"
+    assert(mask.ndim == 2), "Mask must be a 2D tensor"
+    assert(erode_n_pixels % 2 == 1), "Erode n pixels must be odd"
+    
+    if erode_n_pixels > 0:
+        with torch.no_grad():
+            mask = mask.unsqueeze(0).unsqueeze(0)
+            kernel = torch.ones((erode_n_pixels, erode_n_pixels))
+            kernel = kernel.unsqueeze(0).unsqueeze(0)
+            kernel = kernel.to(mask.device)
+            mask = torch.nn.functional.conv2d(mask, kernel, padding=erode_n_pixels//2)
+            mask = (mask == (erode_n_pixels**2)).float()
+            # mask = torch.nn.functional.conv2d(mask, kernel, padding=erode_n_pixels//2)
+            # mask = (mask > 0.0)
+            # mask = mask.squeeze(0).squeeze(0)
+    
+    return mask
 
 def erode_and_dilate_mask(mask : torch.Tensor, erode_and_dilate_n_pixels : int = 0) -> torch.Tensor:
     """ Perform erosion and dilation on a mask to remove islands and fill holes.
@@ -387,6 +459,7 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
     images_list = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(images_path)) for f in fn if (f.endswith(".jpg") or f.endswith(".jpeg") or f.endswith(".JPG") or f.endswith(".JPEG") or f.endswith(".png") or f.endswith(".PNG"))]
     images_list.sort()
     
+    images_list = images_list[::4]
     # images_list = images_list[300:550]
     
     assert(len(images_list) > 0), "No images found in the images path : {}".format(images_path)
@@ -395,160 +468,185 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
     # Load detection model from ultralytics
     detection_model = YOLO(f"yolo11{args.yolo_model_size}.pt") #, device = video_predictor.device)  # model for segmantion and detection
 
-    # Initialize output variables for YOLO detections
-    yolo_detections_output = []
-    image_decomposition_positions = ["left", "front", "right", "back"]
-
-    # ======== YOLO Detections ========
-    for image_idx in tqdm(range(0, len(images_list), args.yolo_batch_size), desc="Processing input images (detection with YOLO)"):
+    if args.interact_zone_tracking != "":
         
-        image_files_batch = images_list[image_idx:image_idx+args.yolo_batch_size]
-
-        # Batch output variables
-        batch_list = []
-        original_images_list = []
-        
-        # Prepare batch by splitting the image into 4 overlapping subimages
-        for image_file in image_files_batch:
-            image = Image.open(image_file)
-            image = np.array(image) # [H, W, 3] with usually H = 1920, H = 3840 for 360 images
-            original_images_list.append(image)
-           
-            # Create 4 overlapping images
-            image_left = image[:, :(image.shape[1]//2), :]
-            image_front = image[:, (image.shape[1]//4):(image.shape[1]//4) + (image.shape[1]//2), :]
-            image_right = image[:, (image.shape[1]//4)*2:(image.shape[1]//4)*2 + (image.shape[1]//2), :]
-            # back image is a composition of the edges
-            image_back = np.concatenate([image[:, -(image.shape[1]//4):, :], image[:, :(image.shape[1]//4), :]], axis=1)
+        # Use a prompt for the first bbox provided in the args
+        interact_zone_prompt = args.interact_zone_tracking.split(",")
+        assert len(interact_zone_prompt) == 4, "Interact zone prompt should be 4 values separated by commas"
+        interact_zone_prompt = [int(x) for x in interact_zone_prompt]
+        prInfo(f"Using interact zone prompt : {interact_zone_prompt} for the first image")
+        yolo_detections_output = []
+        for image_idx in range(0, len(images_list)):
+            current_image_detections = {"image_file": os.path.basename(images_list[image_idx]), "detections": []}
+            if image_idx == 0:
+                # only add for the first image
+                current_image_detections["detections"].append({"xmin": interact_zone_prompt[0],
+                                                               "ymin": interact_zone_prompt[1],
+                                                               "xmax": interact_zone_prompt[2],
+                                                               "ymax": interact_zone_prompt[3]})
+            else:
+                # empty detections
+                pass
             
-            batch_list.extend([image_left, image_front, image_right, image_back])
-            
-            if False:
-                # FOR DEBUGGING
-                # draw the valid zones of each subimage (the center of the image, if a topleft detection 
-                # falls outside of it we will not use it so it will be processed another camera)
-                image_left = image_left.astype(np.float32) / 255.0
-                image_left[:, :image_left.shape[1]//4, :] *= 0.5
-                image_left[:, image_left.shape[1]//4*3:, :] *= 0.5
-
-                image_front = image_front.astype(np.float32) / 255.0
-                image_front[:, :image_front.shape[1]//4, :] *= 0.5
-                image_front[:, image_front.shape[1]//4*3:, :] *= 0.5
-
-                image_right = image_right.astype(np.float32) / 255.0            
-                image_right[:, :image_right.shape[1]//4, :] *= 0.5
-                image_right[:, image_right.shape[1]//4*3:, :] *= 0.5
-                
-                image_back = image_back.astype(np.float32) / 255.0
-                image_back[:, :image_back.shape[1]//4, :] *= 0.5
-                image_back[:, image_back.shape[1]//4*3:, :] *= 0.5
-                
-                stacked = np.concatenate([image_left, image_front, image_right, image_back], axis=0)
-                stacked = cv2.resize(stacked, (stacked.shape[1]//8, stacked.shape[0]//8))
-                stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
-                cv2.imshow("stacked", stacked)
-                key = cv2.waitKey(int(1000/15))
-                if key == ord('q') or key == 27:
-                    exit(0)
-                batch_list.append(stacked)
-            
-        # Run YOLO detection on the batch
-        batch_detections = detection_model(batch_list, verbose=False, device = video_predictor.device) # results of len args.yolo_batch_size * 4
-        
-        # Rearrange the outputs by original images
-        batch_detections = [batch_detections[i:i+4] for i in range(0, len(batch_detections), 4)] # list of list
-        
-        # Process each original image
-        for batch_image_idx, subimages_detections in enumerate(batch_detections):
-
-            original_image = original_images_list[batch_image_idx].copy()
-            original_image_width = original_image.shape[1]
-            subimage_width = original_image_width // 2
-
-            # YOLO detection element to be appended to the output
-            current_image_detections = {"image_file": os.path.basename(image_files_batch[batch_image_idx]), "detections": []}
-            
-            # Iterate over subimages
-            for position, result in zip(image_decomposition_positions, subimages_detections):
-                
-                # print(result.names) # dict with {id: NAME, id: NAME, ...}
-                # print(result.boxes.cls) # tensor of class ids
-                # print(result.boxes.conf) # tensor of confidnece scores
-                # print(result.boxes.xyxy) # tensor of shape (N, 4) with coordinates in original image
-            
-                if result.boxes is None:
-                    continue
-                
-                boxes = result.boxes.xyxy
-                class_ids = result.boxes.cls
-                confidences = result.boxes.conf
-                classes_names =  [result.names[int(class_id.cpu().numpy())] for class_id in class_ids]
-                
-                for box_idx, (box, class_name, confidence) in enumerate(zip(boxes, classes_names, confidences)):
-                    if class_name != "person":
-                        continue
-                    
-                    if confidence.item() < args.yolo_confidence_threshold:
-                        continue
-                    
-                    xmin = box[0].item()
-                    ymin = box[1].item()
-                    xmax = box[2].item()
-                    ymax = box[3].item()
-                    if xmin < subimage_width//4 or xmin > 3 * (subimage_width//4):
-                        # do not consider "edge detections" they will be processed in another camera
-                        continue
-                    
-                    # Adjust the bounding box coordinates to the original image
-                    if position == "left":
-                        xmin += 0
-                        xmax += 0
-                    elif position == "front":
-                        xmin += original_image_width//4
-                        xmax += original_image_width//4
-                    elif position == "right":
-                        xmin += 2 * original_image_width//4
-                        xmax += 2 * original_image_width//4
-                    elif position == "back":
-                        # weird case because then xmax ends up at the other end of the image but keep it like this for consistency
-                        xmin += 3 * original_image_width//4
-                        xmax += 3 * original_image_width//4
-                    
-                    # Append the detection to the output of the current image
-                    current_image_detections["detections"].append({"xmin": int(xmin),
-                                                                    "ymin": int(ymin),
-                                                                    "xmax": int(xmax),
-                                                                    "ymax": int(ymax),
-                                                                    "class_name": class_name,
-                                                                    "confidence": confidence.item(),
-                                                                    "validity": "valid" if confidence.item() > args.yolo_confidence_threshold else "low_conf"})
-            
-            # Append the detection element to the output of YOLO detections
             yolo_detections_output.append(current_image_detections)
 
-            if False:
-                # FOR DEBUGGING
-                # draw box
-                original_image_show = original_image.copy()
-                for detection in current_image_detections["detections"]:
-                    cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), (0, 0, 255), 2)
-                    cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    else:
+        # No prompt detections, run YOLO detections
+        
+        # Initialize output variables for YOLO detections
+        yolo_detections_output = []
+        image_decomposition_positions = ["left", "front", "right", "back"]
+
+        # ======== YOLO Detections ========
+        for image_idx in tqdm(range(0, len(images_list), args.yolo_batch_size), desc="Processing input images (detection with YOLO)"):
             
-                img_show = original_image_show.copy()
-                img_show = cv2.resize(img_show, (1920, 960))
-                img_show = cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB)
-                cv2.imshow("image_result", img_show)
-                key = cv2.waitKey(0)
-                if key == ord('q') or key == 27:
-                    exit(0)
-                cv2.destroyAllWindows()
+            image_files_batch = images_list[image_idx:image_idx+args.yolo_batch_size]
+
+            # Batch output variables
+            batch_list = []
+            original_images_list = []
+            
+            # Prepare batch by splitting the image into 4 overlapping subimages
+            for image_file in image_files_batch:
+                image = Image.open(image_file)
+                image = np.array(image) # [H, W, 3] with usually H = 1920, H = 3840 for 360 images
+                original_images_list.append(image)
+            
+                # Create 4 overlapping images
+                image_left = image[:, :(image.shape[1]//2), :]
+                image_front = image[:, (image.shape[1]//4):(image.shape[1]//4) + (image.shape[1]//2), :]
+                image_right = image[:, (image.shape[1]//4)*2:(image.shape[1]//4)*2 + (image.shape[1]//2), :]
+                # back image is a composition of the edges
+                image_back = np.concatenate([image[:, -(image.shape[1]//4):, :], image[:, :(image.shape[1]//4), :]], axis=1)
+                
+                batch_list.extend([image_left, image_front, image_right, image_back])
+                
+                if False:
+                    # FOR DEBUGGING
+                    # draw the valid zones of each subimage (the center of the image, if a topleft detection 
+                    # falls outside of it we will not use it so it will be processed another camera)
+                    image_left = image_left.astype(np.float32) / 255.0
+                    image_left[:, :image_left.shape[1]//4, :] *= 0.5
+                    image_left[:, image_left.shape[1]//4*3:, :] *= 0.5
+
+                    image_front = image_front.astype(np.float32) / 255.0
+                    image_front[:, :image_front.shape[1]//4, :] *= 0.5
+                    image_front[:, image_front.shape[1]//4*3:, :] *= 0.5
+
+                    image_right = image_right.astype(np.float32) / 255.0            
+                    image_right[:, :image_right.shape[1]//4, :] *= 0.5
+                    image_right[:, image_right.shape[1]//4*3:, :] *= 0.5
+                    
+                    image_back = image_back.astype(np.float32) / 255.0
+                    image_back[:, :image_back.shape[1]//4, :] *= 0.5
+                    image_back[:, image_back.shape[1]//4*3:, :] *= 0.5
+                    
+                    stacked = np.concatenate([image_left, image_front, image_right, image_back], axis=0)
+                    stacked = cv2.resize(stacked, (stacked.shape[1]//8, stacked.shape[0]//8))
+                    stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
+                    cv2.imshow("stacked", stacked)
+                    key = cv2.waitKey(int(1000/15))
+                    if key == ord('q') or key == 27:
+                        exit(0)
+                    batch_list.append(stacked)
+                
+            # Run YOLO detection on the batch
+            batch_detections = detection_model(batch_list, verbose=False, device = video_predictor.device) # results of len args.yolo_batch_size * 4
+            
+            # Rearrange the outputs by original images
+            batch_detections = [batch_detections[i:i+4] for i in range(0, len(batch_detections), 4)] # list of list
+            
+            # Process each original image
+            for batch_image_idx, subimages_detections in enumerate(batch_detections):
+
+                original_image = original_images_list[batch_image_idx].copy()
+                original_image_width = original_image.shape[1]
+                subimage_width = original_image_width // 2
+
+                # YOLO detection element to be appended to the output
+                current_image_detections = {"image_file": os.path.basename(image_files_batch[batch_image_idx]), "detections": []}
+                
+                # Iterate over subimages
+                for position, result in zip(image_decomposition_positions, subimages_detections):
+                    
+                    # print(result.names) # dict with {id: NAME, id: NAME, ...}
+                    # print(result.boxes.cls) # tensor of class ids
+                    # print(result.boxes.conf) # tensor of confidnece scores
+                    # print(result.boxes.xyxy) # tensor of shape (N, 4) with coordinates in original image
+                
+                    if result.boxes is None:
+                        continue
+                    
+                    boxes = result.boxes.xyxy
+                    class_ids = result.boxes.cls
+                    confidences = result.boxes.conf
+                    classes_names =  [result.names[int(class_id.cpu().numpy())] for class_id in class_ids]
+                    
+                    for box_idx, (box, class_name, confidence) in enumerate(zip(boxes, classes_names, confidences)):
+                        if class_name != "person":
+                            continue
+                        
+                        if confidence.item() < args.yolo_confidence_threshold:
+                            continue
+                        
+                        xmin = box[0].item()
+                        ymin = box[1].item()
+                        xmax = box[2].item()
+                        ymax = box[3].item()
+                        if xmin < subimage_width//4 or xmin > 3 * (subimage_width//4):
+                            # do not consider "edge detections" they will be processed in another camera
+                            continue
+                        
+                        # Adjust the bounding box coordinates to the original image
+                        if position == "left":
+                            xmin += 0
+                            xmax += 0
+                        elif position == "front":
+                            xmin += original_image_width//4
+                            xmax += original_image_width//4
+                        elif position == "right":
+                            xmin += 2 * original_image_width//4
+                            xmax += 2 * original_image_width//4
+                        elif position == "back":
+                            # weird case because then xmax ends up at the other end of the image but keep it like this for consistency
+                            xmin += 3 * original_image_width//4
+                            xmax += 3 * original_image_width//4
+                        
+                        # Append the detection to the output of the current image
+                        current_image_detections["detections"].append({"xmin": int(xmin),
+                                                                        "ymin": int(ymin),
+                                                                        "xmax": int(xmax),
+                                                                        "ymax": int(ymax),
+                                                                        "class_name": class_name,
+                                                                        "confidence": confidence.item(),
+                                                                        "validity": "valid" if confidence.item() > args.yolo_confidence_threshold else "low_conf"})
+                
+                # Append the detection element to the output of YOLO detections
+                yolo_detections_output.append(current_image_detections)
+
+                if False:
+                    # FOR DEBUGGING
+                    # draw box
+                    original_image_show = original_image.copy()
+                    for detection in current_image_detections["detections"]:
+                        cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), (0, 0, 255), 2)
+                        cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                
+                    img_show = original_image_show.copy()
+                    img_show = cv2.resize(img_show, (1920, 960))
+                    img_show = cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB)
+                    cv2.imshow("image_result", img_show)
+                    key = cv2.waitKey(0)
+                    if key == ord('q') or key == 27:
+                        exit(0)
+                    cv2.destroyAllWindows()
     
     # Make sure the number of detections and images is the same
     assert(len(yolo_detections_output) == len(images_list)), "Number of detections and images should be the same"
     
     # ======== SAM2 Segmentation and Tracking ========
     video_predictor_initialized = False
-    sam2_detections_output = {} # dict in the form {idx: {"image_file": FILENAME, "detections": [...]}, "idx": ...}, trasnformed to list before exporting
+    sam2_detections_output = {} # dict in the form {idx: {"image_file": FILENAME, "detections": [...]}, "idx": ...}, transformed to list before exporting
     current_sam2_track_id = 0
     # Run SAM2 segmentation and tracking
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
@@ -579,7 +677,7 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                 yolo_detection_box_height_prop = (yolo_detection_box[3] - yolo_detection_box[1]) / image_centered.shape[0]
                 
                 if yolo_detection_box_width_prop < MIN_BOX_SIZE_WIDTH_PROP_OF_CENTERED_IMAGE or yolo_detection_box_height_prop < MIN_BOX_SIZE_HEIGHT_PROP_OF_CENTERED_IMAGE:
-                    # prWarning(f"[{image_idx}][YOLO detection {yolo_detection_idx}] Yolo detection box is too small ({yolo_detection_box_width_prop * 100:.2f}%, {yolo_detection_box_height_prop * 100:.2f}%). Skipping.")
+                    prWarning(f"[{image_idx}][YOLO detection {yolo_detection_idx}] Yolo detection box is too small ({yolo_detection_box_width_prop * 100:.2f}%, {yolo_detection_box_height_prop * 100:.2f}%). Skipping.")
                     continue
                 
                 # If the video predictor is initialized, reset it before starting a new track
@@ -598,6 +696,11 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                 
                 centered_image_mask = (out_mask_logits[0, 0, :, :] > 0.0) # Mask of shape [HCentered, WCentered]
                 centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=ERODE_AND_DILATE_N_PIXELS)
+                if args.interact_zone_tracking != "":
+                    # get the convex hull
+                    centered_image_mask = get_convex_hull_mask(centered_image_mask)
+                    centered_image_mask = erode_mask(centered_image_mask, erode_n_pixels=15)
+                
                 bbox_in_centered_image = get_bounding_box_torch(centered_image_mask)
                 bbox_in_absolute_image = [bbox_in_centered_image[0] + centered_image_xmin, 
                                           bbox_in_centered_image[1], 
@@ -654,6 +757,11 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                     out_obj_ids, out_mask_logits = video_predictor.track(following_image_centered)
                     centered_image_mask = (out_mask_logits[0, 0, :, :] > 0.0)
                     centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=ERODE_AND_DILATE_N_PIXELS)
+                    if args.interact_zone_tracking != "":
+                        # get the convex hull
+                        centered_image_mask = get_convex_hull_mask(centered_image_mask)
+                        centered_image_mask = erode_mask(centered_image_mask, erode_n_pixels=15)
+                        
                     bbox_in_centered_image = get_bounding_box_torch(centered_image_mask)
                     
                     # If the mask is empty, skip or break after a while
@@ -787,8 +895,11 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
     sam2_detections_output_list = filter_isolated_detections(sam2_detections_output_list)
     
     # Write the detections to a JSON file
-    write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json"))
-    
+    if args.interact_zone_tracking != "":
+        write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json"))
+    else:
+        write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "interact_zone_tracking_360.json"))
+        
     assert(len(sam2_detections_output_list) == len(images_list)), "Number of detections and images should be the same"
     
 
@@ -802,6 +913,7 @@ if __name__ == "__main__":
     parser.add_argument("--yolo_batch_size", "-ybs", type=int, default=16, help="Batch size for the YOLO detection")
     parser.add_argument("--vos_optimized", "-vos", action="store_true", default=False, help="Use the VOS optimized model")
     parser.add_argument("--display", "-disp", action="store_true", default=False, help="Display the detections live")
+    parser.add_argument("--interact_zone_tracking", "-izt", type=str, default="", help="Don't track the people but the zone to interact with, give a prompt at the beggining ([xmin, ymin, xmax, ymax] in pixels) and track from there")
     # parser.add_argument("--ngpu", "-ngpu", type=int, default=0, help="Number of GPUs to use, default 0 means use all GPUs")
     args = parser.parse_args()
 

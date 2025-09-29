@@ -18,7 +18,23 @@ pip install -r requirements.txt
 
 Place your video under `./demo/data` (or use `-v` to change the input video path and `-s` for the ouput saving path, then the appropriate `-d` to run outside of the directory)
 
-From a video run these 3 commands to extract images, detect segment and track people inside, and assess if they are interacting (by default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs)
+From a video run these 3 commands to extract images, detect segment and track people inside, and assess if they are interacting 
+
+<details>
+
+<summary>Mask for interaction</summary>
+
+By default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs if you have a fixed interaction zone. If you have a moving interaction zone (like in SSUP) you can first track the interaction zone with :
+
+```
+python detect_segment_and_track.py -d ./demo/output/SSUP_SAMPLE_0/ -izt 2688,1042,4585,1919
+```
+
+Where `-izt 2688,1042,4585,1919` is the bounding box of the interaction zone in the first image then it will run a full pass of tracking to find the masks of the interaction zone. Then compute the convex hull of these masks.
+
+
+</details>
+
 
 ```
 python extract_images.py -v ./demo/data/2025_06_13_11_15_31_Theta360.mkv
