@@ -1,35 +1,22 @@
 import argparse
 import os
 import sys
-
-here = os.path.dirname(__file__)
-
-sys.path.append(os.path.join(here, '../'))
-sys.path.append(os.path.join(here))
-
-from misc.print_utils import *
-from misc.other_utils import *
-
+import datetime
+import numpy as np
+import cv2
+import torch
 from tqdm import tqdm
 
 import warnings
 warnings.filterwarnings("ignore")
 
-import sys
 here = os.path.dirname(__file__)
 sys.path.append(os.path.join(here, '../'))
 
 from misc.print_utils import *
-
-import datetime
-import numpy as np
-import cv2
-import socket
-import torch
-import multiprocessing as mp
-hostname = socket.gethostname()
-
+from misc.other_utils import *
 from misc.rle_tools import decode_RLE
+
 
 MIN_PIXELS_INTERSECTION = 1000
 

@@ -1,7 +1,6 @@
 import os
 import sys
 import subprocess
-import json
 import shutil
 import time
 import multiprocessing as mp

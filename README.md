@@ -1,11 +1,33 @@
 # Interact360
 
 ## Install
-Need ffmpeg
-Do a requirements.txt
+- Install `ffmpeg` if you dont have it already (for video extraction)
+```
+sudo apt-get install ffmpeg
+```
+
+- Create a conda environment and install dependencies (install torch accordingly to your CUDA version)
+```
+conda create --name interact360_env python=3.10
+conda activate interact360_env
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
+pip install -r requirements.txt
+```
 
 ## Run
 
+From a video run these 3 commands to extract images, detect segment and track people inside, and assess if they are interacting (by default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs)
+
+```
+python extract_images.py -v ./demo/data/2025_06_13_11_15_31_Theta360.mkv
+python detect_segment_and_track.py -d ./demo/output/2025_06_13_11_15_31_Theta360
+python detect_interactions.py -d ./demo/output/2025_06_13_11_15_31_Theta360
+```
+
+Then you can see the result in the visualizer !
+```
+python extract_images.py -d ./demo/output
+```
 
 ## Acknoledgment 
 SAM2

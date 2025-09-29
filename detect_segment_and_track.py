@@ -1,19 +1,16 @@
 import torch
-from sam2.build_sam import build_sam2_camera_predictor
-from sam2.sam2_camera_predictor import SAM2CameraPredictor
 import os
+import argparse
 import sys
-import subprocess
-import json
-import shutil
-import time
-import multiprocessing as mp
 from tqdm import tqdm
 from PIL import Image
 import numpy as np
 import cv2
-from torchvision.transforms import functional as F
+
 from ultralytics import YOLO
+
+from sam2.build_sam import build_sam2_camera_predictor
+from sam2.sam2_camera_predictor import SAM2CameraPredictor
 
 here = os.path.dirname(__file__)
 sys.path.append(os.path.join(here, '../'))
@@ -21,8 +18,6 @@ sys.path.append(os.path.join(here))
 
 from misc.print_utils import *
 from misc.other_utils import *
-
-import argparse
 from misc.rle_tools import encode_RLE, decode_RLE
 
 SAM2_MODEL_TO_CHECKPOINT = {
