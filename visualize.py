@@ -123,6 +123,9 @@ class PlotWidget(QWidget):
             frames = self.plot_data[track_id]['frames']
             values = self.plot_data[track_id]['values']
             
+            # reorder by frames
+            frames, values = zip(*sorted(zip(frames, values)))
+            
             # Filter data within frame window
             valid_indices = [i for i, f in enumerate(frames) if frame_start <= f <= frame_end]
             
@@ -178,7 +181,7 @@ class PlotWidget(QWidget):
             if data['frames'] and data['values']:
                 color = colors[track_id % len(colors)]
                 color = (color[2], color[1], color[0])  # Convert BGR to RGB
-                    
+                                
                 # Create curve for this track
                 curve = self.plot_widget.plot(
                     data['frames'], 
@@ -612,14 +615,15 @@ class Interact360Visualizer(QMainWindow):
         self.engagement_plot = PlotWidget(
             "Track Engagement", "Engagement Level", 
             self.plot_window_past, self.plot_window_future, 
-            allow_values="nonnegative", ylims=[0, 3]
+            allow_values="nonnegative", ylims=[0, 3.5]
         )
         layout.addWidget(self.engagement_plot)
         
         self.mask_size_plot = PlotWidget(
             "Mask Size", "Pixels", 
             self.plot_window_past, self.plot_window_future, 
-            allow_values="strictlynonnegative"
+            allow_values="strictlynonnegative",
+            ylims = [0, 300000]
         )
         layout.addWidget(self.mask_size_plot)
         
@@ -1137,7 +1141,7 @@ class Interact360Visualizer(QMainWindow):
 
 def main():
     parser = argparse.ArgumentParser(description="Interact360 Visualizer")
-    parser.add_argument("--directory", "-d", type=str, required=True,
+    parser.add_argument("--directory", "-d", type=str, default="./demo/output/",
                        help="Output directory containing processed data (e.g., demo/output)")
     
     args = parser.parse_args()
