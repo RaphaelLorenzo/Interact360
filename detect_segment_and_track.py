@@ -291,7 +291,7 @@ def erode_mask(mask : torch.Tensor, erode_n_pixels : int = 0) -> torch.Tensor:
             kernel = kernel.unsqueeze(0).unsqueeze(0)
             kernel = kernel.to(mask.device)
             mask = torch.nn.functional.conv2d(mask, kernel, padding=erode_n_pixels//2)
-            mask = (mask == (erode_n_pixels**2)).float()
+            mask = (mask == (erode_n_pixels**2)) #.float()
             # mask = torch.nn.functional.conv2d(mask, kernel, padding=erode_n_pixels//2)
             # mask = (mask > 0.0)
             # mask = mask.squeeze(0).squeeze(0)
