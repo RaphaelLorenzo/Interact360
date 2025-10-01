@@ -1,4 +1,5 @@
 import torch
+from misc.print_utils import timeit
 
 
 def encode_RLE(mask):
@@ -34,6 +35,7 @@ def encode_RLE(mask):
         
     return runs
 
+# @timeit
 def decode_RLE(runs, shape):
     """
     Decode a RLE into a mask.

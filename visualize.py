@@ -19,6 +19,8 @@ from misc.other_utils import *
 import torch
 from misc.rle_tools import decode_RLE
 
+MASK_RLE_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 try:
     from PyQt6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -328,7 +330,7 @@ class Interact360Visualizer(QMainWindow):
         self.load_interaction_mask()
         
         # Display options
-        self.show_masks = True
+        self.show_masks = False
         self.show_boxes = True
         self.show_track_ids = True
         self.show_interaction_highlights = True
@@ -524,7 +526,7 @@ class Interact360Visualizer(QMainWindow):
         options_layout = QVBoxLayout(options_group)
         
         self.show_masks_cb = QCheckBox("Show Masks [M]")
-        self.show_masks_cb.setChecked(True)
+        self.show_masks_cb.setChecked(False)
         self.show_masks_cb.toggled.connect(self.toggle_show_masks)
         options_layout.addWidget(self.show_masks_cb)
         
@@ -841,7 +843,7 @@ class Interact360Visualizer(QMainWindow):
         
         try:
             # Decode the mask
-            mask = decode_RLE(mask_rle, image_shape)
+            mask = decode_RLE(mask_rle.to(MASK_RLE_DEVICE), image_shape)
             mask_np = mask.cpu().numpy().astype(bool)
             
             # Find intersection
@@ -863,7 +865,7 @@ class Interact360Visualizer(QMainWindow):
                         # Get the first detection as interaction zone mask
                         interaction_det = interact_zone_entry["detections"][0]
                         if "mask_rle" in interaction_det:
-                            mask_rle = torch.tensor(interaction_det["mask_rle"], dtype=torch.int32)
+                            mask_rle = torch.tensor(interaction_det["mask_rle"], dtype=torch.int32).to(MASK_RLE_DEVICE)
                             mask = decode_RLE(mask_rle, image_shape)
                             return mask.cpu().numpy().astype(bool)
                 except Exception as e:
@@ -932,6 +934,7 @@ class Interact360Visualizer(QMainWindow):
         self.frame_slider.setValue(new_frame)
     
     def update_image_display(self):
+        tic_global = time.time()
         """Update image display with tracks"""
         if not self.image_files or self.current_frame >= len(self.image_files):
             return
@@ -940,13 +943,19 @@ class Interact360Visualizer(QMainWindow):
         detections = self.detections.get(self.current_frame, {}).get("detections", [])
         
         # Load image
+        tic = time.time()
         image = cv2.imread(image_file)
         if image is None:
             prError(f"Could not load image: {image_file}")
             return
+        tac = time.time()
+        # prTimer(f"Load image {image_file}", tic, tac)
         
         # Draw tracks on the image
+        tic = time.time()
         image = self.draw_tracks_on_image(image, detections)
+        tac = time.time()
+        # prTimer(f"Draw tracks on image", tic, tac)
         
         # Convert BGR to RGB for Qt
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -957,6 +966,8 @@ class Interact360Visualizer(QMainWindow):
         # Update image info
         info_text = f"Frame {self.current_frame} - {len(detections)} tracks"
         self.info_label.setText(info_text)
+        tac_global = time.time()
+        # prTimer(f"Update image display", tic_global, tac_global)
     
     def draw_tracks_on_image(self, image, detections):
         """Draw track visualizations on image"""
@@ -1015,7 +1026,7 @@ class Interact360Visualizer(QMainWindow):
             if self.show_masks and "mask_rle" in det:
                 try:
                     # Decode RLE mask
-                    mask_rle = torch.tensor(det["mask_rle"], dtype=torch.int32)
+                    mask_rle = torch.tensor(det["mask_rle"], dtype=torch.int32).to(MASK_RLE_DEVICE)
                     mask = decode_RLE(mask_rle, (image_height, image_width))
                     mask_np = mask.cpu().numpy().astype(bool)
                     
@@ -1062,7 +1073,7 @@ class Interact360Visualizer(QMainWindow):
                 if self.show_masks and "mask_rle" in det:
                     try:
                         # Use mask contour for selected track
-                        mask_rle = torch.tensor(det["mask_rle"], dtype=torch.int32)
+                        mask_rle = torch.tensor(det["mask_rle"], dtype=torch.int32).to(MASK_RLE_DEVICE)
                         mask = decode_RLE(mask_rle, (image_height, image_width))
                         mask_np = mask.cpu().numpy().astype(np.uint8)
                         
@@ -1176,7 +1187,7 @@ class Interact360Visualizer(QMainWindow):
         """Start automatic playback"""
         self.is_playing = True
         self.play_pause_btn.setText("⏸ Pause [Space]")
-        self.play_timer.start(100)  # 100ms interval
+        self.play_timer.start(1)  # 1ms interval
         self.statusBar().showMessage(f"Playing... (skip: {self.play_skip})")
     
     def pause_playback(self):
