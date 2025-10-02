@@ -55,7 +55,16 @@ def main(args):
     prInfo(f"Video name: {video_name}")
     prInfo(f"Video extension: {video_extension}")
     
-    output_dir = os.path.join(args.save_dir, video_name, "episodes")
+    if args.file_start_timestamp == "birthtime":
+        file_start_timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(args.video_path)).timestamp()
+    else:
+        try:
+            file_start_timestamp = datetime.datetime.strptime(args.file_start_timestamp, "%Y_%m_%d_%H_%M_%S_%f").timestamp()
+        except Exception as e:
+            prError(f"Error parsing file start timestamp {args.file_start_timestamp} - {str(e)}, expect format YYYY_MM_DD_HH_MM_SS_XXXXX")
+            raise Exception(f"Error parsing file start timestamp {args.file_start_timestamp} - {str(e)}, expect format YYYY_MM_DD_HH_MM_SS_XXXXX")
+    
+    output_dir = os.path.join(args.save_dir, video_name)
     output_path = os.path.join(output_dir, "images_360") #, "0000", "images_360")
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -70,6 +79,7 @@ def main(args):
     with open(output_txt_path, "w") as f:
         f.write(args.video_path + "\n")
         f.write(str(args.framerate) + "\n")
+        f.write(str(file_start_timestamp) + "\n") # timestamp in seconds
     
     prInfo(f"Running ffmpeg for {args.video_path} to split into multiple videos of 5 minutes each to allow for parallel processing later")
     
@@ -110,12 +120,15 @@ def main(args):
     # move the images to the output path
     subdirs = [f"{output_path}/{i:03d}" for i in range(len(splitted_videos))]
     image_index = 0
+    time_gap_between_images = 1.0 / args.framerate
     for subdir in subdirs:
         # move all images  from subdir to output_path by increasing the image_index
         images_in_subdir = [os.path.join(subdir, f) for f in os.listdir(subdir) if f.endswith(".jpg")]
         images_in_subdir.sort()
         for image in images_in_subdir:
-            shutil.move(image, os.path.join(output_path, f"frame_{image_index:06d}.jpg"))
+            image_timestamp = file_start_timestamp + image_index * time_gap_between_images
+            image_timestamp_str = datetime.datetime.fromtimestamp(image_timestamp).strftime("%Y_%m_%d_%H_%M_%S_%f")
+            shutil.move(image, os.path.join(output_path, f"{image_timestamp_str}.jpg"))
             image_index += 1
         
         # remove the subdir when it is emptied
@@ -129,10 +142,19 @@ def main(args):
     prSuccess(f"Removed temporary splitted videos directory {output_path_splitted_videos}")
     
     # Create episodes bases on the rules
+    episodes_metadata = []
     if args.episodes_method == "single":
         os.makedirs(os.path.join(output_dir, "episodes", "0000"))
         # move the whole images_360 directory to the episode directory
         shutil.move(output_path, os.path.join(output_dir, "episodes", "0000", "images_360"))
+        first_image_timestamp = file_start_timestamp
+        last_image_timestamp = file_start_timestamp + image_index * time_gap_between_images
+        episodes_metadata.append({
+            "session": video_name,
+            "episode": "0000",
+            "start_time": first_image_timestamp,
+            "end_time": last_image_timestamp + time_gap_between_images
+        })
         
     elif args.episodes_method == "time":
         # list all files in output_path
@@ -152,6 +174,14 @@ def main(args):
                 os.makedirs(os.path.join(output_dir, "episodes", f"{i:04d}", "images_360"))
                 
             files_in_episode = files[i*episode_duration_in_frame:(i+1)*episode_duration_in_frame]
+            first_image_timestamp = datetime.datetime.strptime(os.path.basename(files_in_episode[0]).split(".")[0], "%Y_%m_%d_%H_%M_%S_%f").timestamp()
+            last_image_timestamp = datetime.datetime.strptime(os.path.basename(files_in_episode[-1]).split(".")[0], "%Y_%m_%d_%H_%M_%S_%f").timestamp()
+            episodes_metadata.append({
+                "session": video_name,
+                "episode": f"{i:04d}",
+                "start_time": first_image_timestamp,
+                "end_time": last_image_timestamp + time_gap_between_images
+            })
             for file in files_in_episode:
                 shutil.move(file, os.path.join(output_dir, "episodes", f"{i:04d}", "images_360", os.path.basename(file)))
             prSuccess(f"Created episode {i:04d} with {len(files_in_episode)} frames")
@@ -163,6 +193,8 @@ def main(args):
     shutil.rmtree(output_path)
     prSuccess(f"Removed temporary images directory {output_path}")
     
+    write_dic_to_json_file(episodes_metadata, os.path.join(output_dir, "episodes.json"))
+    
     return
     
 if __name__ == "__main__":
@@ -173,6 +205,7 @@ if __name__ == "__main__":
     parser.add_argument("--workers", "-w", type=int, default=0, help="Number of cores to use for parallel processing. Default: 0 (use half of available cores)") 
     parser.add_argument("--episodes_method", "-em", type=str, default="single", help="Method to use to create episodes : single, time, detection")
     parser.add_argument("--max_episodes_time", "-met", type=int, default=300, help="Max time in seconds to create episodes, does not apply if method is single")
+    parser.add_argument("--file_start_timestamp", "-fst", type=str, default="birthtime", help="File start timestamp in the format YYYY_MM_DD_HH_MM_SS_XXXXX, default is using file birthtime")
     args = parser.parse_args()
     
     if args.episodes_method == "single":
