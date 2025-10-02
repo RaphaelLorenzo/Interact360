@@ -55,14 +55,14 @@ def main(args):
     prInfo(f"Video name: {video_name}")
     prInfo(f"Video extension: {video_extension}")
     
-    output_path = os.path.join(args.save_dir, video_name, "episodes", "0000", "images_360")
+    output_dir = os.path.join(args.save_dir, video_name, "episodes")
+    output_path = os.path.join(output_dir, "images_360") #, "0000", "images_360")
     if not os.path.exists(output_path):
         os.makedirs(output_path)
         prSuccess(f"Output path {output_path} created")
     else:
         prWarning(f"Output path {output_path} already exists, will overwrite it")
         time.sleep(1)
-        # remove the output directory
         shutil.rmtree(output_path)
         prInfo(f"Output path {output_path} removed")
     
@@ -73,7 +73,7 @@ def main(args):
     
     prInfo(f"Running ffmpeg for {args.video_path} to split into multiple videos of 5 minutes each to allow for parallel processing later")
     
-    # split the mkv file in videos of 5 minutes each max
+    # split the mkv file in videos of 5 minutes each for parallel processing
     output_path_splitted_videos = os.path.join(args.save_dir, video_name, 'splitted_videos_360')
     if not os.path.exists(output_path_splitted_videos):
         os.makedirs(output_path_splitted_videos)
@@ -84,7 +84,7 @@ def main(args):
         shutil.rmtree(output_path_splitted_videos)
         os.makedirs(output_path_splitted_videos)
     
-    # split the mkv file in 1000 frames each
+    # split the mkv file in videos of 5 minutes each for parallel processing
     prInfo(f"Splitting {args.video_path} in {output_path_splitted_videos}...")
     mkvfile_rn = os.path.basename(args.video_path).split(".")[0]
     subprocess.run(["ffmpeg", "-i", args.video_path, "-c", "copy", "-map", "0", "-f", "segment", "-segment_time", "300", "-reset_timestamps", "1", os.path.join(output_path_splitted_videos, f"{mkvfile_rn}_%03d.{video_extension}")])
@@ -128,6 +128,41 @@ def main(args):
     shutil.rmtree(output_path_splitted_videos)
     prSuccess(f"Removed temporary splitted videos directory {output_path_splitted_videos}")
     
+    # Create episodes bases on the rules
+    if args.episodes_method == "single":
+        os.makedirs(os.path.join(output_dir, "episodes", "0000"))
+        # move the whole images_360 directory to the episode directory
+        shutil.move(output_path, os.path.join(output_dir, "episodes", "0000", "images_360"))
+        
+    elif args.episodes_method == "time":
+        # list all files in output_path
+        files = [os.path.join(output_path, f) for f in os.listdir(output_path) if f.endswith(".jpg")]
+        files.sort()
+        # create episodes based on time
+        episode_duration_in_frame = int(args.framerate * args.max_episodes_time)
+        n_episodes = (len(files) // episode_duration_in_frame) + 1
+        prInfo(f"Creating {n_episodes} episodes based on time (total frames : {len(files)}, frames per episode : {episode_duration_in_frame})")
+        for i in range(n_episodes):
+            if not os.path.exists(os.path.join(output_dir, "episodes", f"{i:04d}", "images_360")):
+                os.makedirs(os.path.join(output_dir, "episodes", f"{i:04d}", "images_360"))
+            else:
+                prWarning(f"Episode {i:04d} already exists, will remove it")
+                time.sleep(1)
+                shutil.rmtree(os.path.join(output_dir, "episodes", f"{i:04d}", "images_360"))
+                os.makedirs(os.path.join(output_dir, "episodes", f"{i:04d}", "images_360"))
+                
+            files_in_episode = files[i*episode_duration_in_frame:(i+1)*episode_duration_in_frame]
+            for file in files_in_episode:
+                shutil.move(file, os.path.join(output_dir, "episodes", f"{i:04d}", "images_360", os.path.basename(file)))
+            prSuccess(f"Created episode {i:04d} with {len(files_in_episode)} frames")
+            
+    elif args.episodes_method == "detection":
+        # create episodes based on detection
+        raise NotImplementedError("Not implemented")
+
+    shutil.rmtree(output_path)
+    prSuccess(f"Removed temporary images directory {output_path}")
+    
     return
     
 if __name__ == "__main__":
@@ -136,8 +171,19 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", "-s", type=str, default="./demo/output")
     parser.add_argument("--framerate", "-f", type=int, default=15)
     parser.add_argument("--workers", "-w", type=int, default=0, help="Number of cores to use for parallel processing. Default: 0 (use half of available cores)") 
-    
+    parser.add_argument("--episodes_method", "-em", type=str, default="single", help="Method to use to create episodes : single, time, detection")
+    parser.add_argument("--max_episodes_time", "-met", type=int, default=300, help="Max time in seconds to create episodes, does not apply if method is single")
     args = parser.parse_args()
+    
+    if args.episodes_method == "single":
+        prInfo(f"Create a single episodes : all images in /episodes/0000/images_360")
+        prWarning(f"Ignoring max time per episode")
+    elif args.episodes_method == "time":
+        prInfo(f"Create episodes based on time : max {args.max_episodes_time} seconds per episode")
+    elif args.episodes_method == "detection":
+        prInfo(f"Create episodes based on detection : with max {args.max_episodes_time} seconds per episode")
+    else:
+        prError(f"Invalid episodes method : {args.episodes_method}")
         
     assert(os.path.exists(args.video_path)), f"The video path does not exist at {args.video_path}"
     assert(os.path.isdir(args.save_dir)), f"The save directory does not exist at {args.save_dir}"
