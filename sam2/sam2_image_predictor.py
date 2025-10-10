@@ -181,6 +181,7 @@ class SAM2ImagePredictor:
         multimask_output: bool = True,
         return_logits: bool = False,
         normalize_coords=True,
+        return_torch_tensors: bool = False,
     ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
         """This function is very similar to predict(...), however it is used for batched mode, when the model is expected to generate predictions on multiple images.
         It returns a tuple of lists of masks, ious, and low_res_masks_logits.
@@ -223,11 +224,19 @@ class SAM2ImagePredictor:
                 return_logits=return_logits,
                 img_idx=img_idx,
             )
-            masks_np = masks.squeeze(0).float().detach().cpu().numpy()
-            iou_predictions_np = (
-                iou_predictions.squeeze(0).float().detach().cpu().numpy()
-            )
-            low_res_masks_np = low_res_masks.squeeze(0).float().detach().cpu().numpy()
+            
+            if return_torch_tensors:
+                masks_np = masks.squeeze(0).float().detach()
+                iou_predictions_np = (
+                    iou_predictions.squeeze(0).float().detach()
+                )
+                low_res_masks_np = low_res_masks.squeeze(0).float().detach()                
+            else:
+                masks_np = masks.squeeze(0).float().detach().cpu().numpy()
+                iou_predictions_np = (
+                    iou_predictions.squeeze(0).float().detach().cpu().numpy()
+                )
+                low_res_masks_np = low_res_masks.squeeze(0).float().detach().cpu().numpy()
             all_masks.append(masks_np)
             all_ious.append(iou_predictions_np)
             all_low_res_masks.append(low_res_masks_np)
