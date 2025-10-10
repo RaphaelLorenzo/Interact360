@@ -982,7 +982,10 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         for image_idx, image_file in tqdm(enumerate(images_list), desc="Processing input images (tracking with SAM2)"):            
             yolo_detections_in_image = filtered_yolo_detections_output[image_idx]["detections"]
             if len(yolo_detections_in_image) == 0:
-                prWarning("No detections in image : {}, skipping".format(image_file))
+                # before skipping, create the entry in the sam2_detections_output if it does not exist
+                if image_idx not in sam2_detections_output:
+                    sam2_detections_output[image_idx] = {"image_file": image_file, "detections": []}
+                # prWarning("No detections in image : {}, skipping".format(image_file))
                 continue
 
             # Load the full image
