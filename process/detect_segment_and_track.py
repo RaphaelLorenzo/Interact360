@@ -40,7 +40,7 @@ SAM2_MODEL_TO_CFG = {
 ERODE_AND_DILATE_N_PIXELS = 11
 MIN_BOX_SIZE_WIDTH_PROP_OF_CENTERED_IMAGE = 0.01
 MIN_BOX_SIZE_HEIGHT_PROP_OF_CENTERED_IMAGE = 0.05
-MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE = 0.002 # 0.2% of the image
+MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE = 0.002 # 0.2% of the image (~7K pixels for 1920x1920)
 MAX_OCCLUSION_FRAMES_COUNT = 30
 MIN_OVERLAP_IOU_BOXES = 0.5
 MIN_OVERLAP_IOU_MASKS = 0.7
@@ -714,6 +714,11 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                     # get the convex hull
                     centered_image_mask = get_convex_hull_mask(centered_image_mask)
                     centered_image_mask = erode_mask(centered_image_mask, erode_n_pixels=15)
+                
+                mask_area_prop = centered_image_mask.sum() / (image_centered.shape[0] * image_centered.shape[1])
+                if mask_area_prop < MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE:
+                    prWarning(f"[{image_idx}][YOLO detection {yolo_detection_idx}] Mask area is too small ({mask_area_prop * 100:.2f}%). Skipping.")
+                    continue
                 
                 bbox_in_centered_image = get_bounding_box_torch(centered_image_mask)
                 bbox_in_absolute_image = [bbox_in_centered_image[0] + centered_image_xmin, 
