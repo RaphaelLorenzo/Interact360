@@ -41,7 +41,7 @@ ERODE_AND_DILATE_N_PIXELS = 11
 MIN_BOX_SIZE_WIDTH_PROP_OF_CENTERED_IMAGE = 0.01
 MIN_BOX_SIZE_HEIGHT_PROP_OF_CENTERED_IMAGE = 0.05
 MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE = 0.002 # 0.2% of the image
-MAX_OCCLUSION_FRAMES_COUNT = 60
+MAX_OCCLUSION_FRAMES_COUNT = 30
 MIN_OVERLAP_IOU_BOXES = 0.5
 MIN_OVERLAP_IOU_MASKS = 0.7
 MIN_MASK_IN_MASK_COMP_PROP = 0.95 # if 95% of the current mask is in the compared mask, we consider that we actually are a subpart of it and break
@@ -644,6 +644,16 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
     # Make sure the number of detections and images is the same
     assert(len(yolo_detections_output) == len(images_list)), "Number of detections and images should be the same"
     
+    
+    ## TODO : Here add improvements :
+    # - For faster processing add the possibility of doing this only every N_INITIAL_SKIP images
+    # - For each YOLO detections get SAM2 Image Segmentation mask (with projection / mobile view)
+    # - For each YOLO detections get ViTPose keypoints (with projection / mobile view) and back to global frames
+    # - Check that all keypoints are inside the mask if too many are outside, invalidate the detection
+    # - Check that there is at least NVALID_KEYPOINTS or invalidate the detection
+    # Such that tracking starts with good detections and is only compared with good detections
+    
+    
     # ======== SAM2 Segmentation and Tracking ========
     video_predictor_initialized = False
     sam2_detections_output = {} # dict in the form {idx: {"image_file": FILENAME, "detections": [...]}, "idx": ...}, transformed to list before exporting
@@ -673,6 +683,10 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                 yolo_detection_box = [yolo_detection["xmin"], yolo_detection["ymin"], yolo_detection["xmax"], yolo_detection["ymax"]]
                 image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box) # only cropping supported for now
                 
+                
+                # TODO : here it should be easier, just fetch the SAM2 mask from the yolo detection if it is valid
+                
+                
                 yolo_detection_box_width_prop = (yolo_detection_box[2] - yolo_detection_box[0]) / image_centered.shape[1]
                 yolo_detection_box_height_prop = (yolo_detection_box[3] - yolo_detection_box[1]) / image_centered.shape[0]
                 
@@ -691,7 +705,7 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                 
                 # Get the initial mask from SAM2
                 # always pretend we are at ID 0 and frame 0 since we are restarting from scratch the tracker
-                # use box_in_image_centered as prompt (TODO : could be improved, with pose keypoints for example)
+                # use box_in_image_centered as prompt (TODO : could be improved, with pose keypoints for example, and optimized by doing it first for all YOLO detections)
                 _, out_obj_ids, out_mask_logits = video_predictor.add_new_prompt(frame_idx=0, obj_id=0, bbox=box_in_image_centered)
                 
                 centered_image_mask = (out_mask_logits[0, 0, :, :] > 0.0) # Mask of shape [HCentered, WCentered]
@@ -750,9 +764,7 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                     
                     # Center based on the bounding box of the previous detection
                     following_image_centered, following_box_in_image_centered, following_image_xmin, following_image_xmax = get_image_centered_on_detection(following_image, bbox_in_absolute_image)
-                    
-                    # TODO : could add "remprompting" to improve consistency
-                    
+                                        
                     # Find the mask in the following image
                     out_obj_ids, out_mask_logits = video_predictor.track(following_image_centered)
                     centered_image_mask = (out_mask_logits[0, 0, :, :] > 0.0)
@@ -829,11 +841,7 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
                                                                                         "ymax": bbox_in_absolute_image[3],
                                                                                         "validity": "valid",
                                                                                         "mask_rle": full_image_mask_rle})
-                    
-                    # prDebug(f"[{following_image_idx}][{current_sam2_track_id}] Box : [{int(bbox_in_absolute_image[0])}, {int(bbox_in_absolute_image[1])}, {int(bbox_in_absolute_image[2])}, {int(bbox_in_absolute_image[3])}]")
-                    # prDebug(f"Mask shape : {centered_image_mask.shape}, image centered shape : {following_image_centered.shape}")
-                    
-                    
+
                     if args.display:
                         # draw centered image
                         image_centered_show = following_image_centered.copy()
@@ -909,15 +917,15 @@ def main(args, video_predictor: SAM2CameraPredictor, episode: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360")
-    parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all'")
-    parser.add_argument("--sam2_model", "-sm", type=str, default="tiny", help="SAM2 model to use (tiny, small, base, large)")
-    parser.add_argument("--yolo_model_size", "-ys", type=str, default="x", help="YOLO model size to use (n, s, l, x)")
-    parser.add_argument("--yolo_confidence_threshold", "-yct", type=float, default=0.7, help="YOLO confidence threshold")
-    parser.add_argument("--yolo_batch_size", "-ybs", type=int, default=16, help="Batch size for the YOLO detection")
-    parser.add_argument("--vos_optimized", "-vos", action="store_true", default=False, help="Use the VOS optimized model")
-    parser.add_argument("--display", "-disp", action="store_true", default=False, help="Display the detections live")
-    parser.add_argument("--interact_zone_tracking", "-izt", type=str, default="", help="Don't track the people but the zone to interact with, give a prompt at the beggining ([xmin, ymin, xmax, ymax] in pixels) and track from there")
+    parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360", help="Directory to use (default: %(default)s)")
+    parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all' (default: %(default)s)")
+    parser.add_argument("--sam2_model", "-sm", type=str, default="tiny", help="SAM2 model to use (tiny, small, base, large) (default: %(default)s)")
+    parser.add_argument("--yolo_model_size", "-ys", type=str, default="x", help="YOLO model size to use (n, s, l, x) (default: %(default)s)")
+    parser.add_argument("--yolo_confidence_threshold", "-yct", type=float, default=0.7, help="YOLO confidence threshold (default: %(default)s)")
+    parser.add_argument("--yolo_batch_size", "-ybs", type=int, default=16, help="Batch size for the YOLO detection (default: %(default)s)")
+    parser.add_argument("--vos_optimized", "-vos", action="store_true", default=False, help="Use the VOS optimized model (default: %(default)s)")
+    parser.add_argument("--display", "-disp", action="store_true", default=False, help="Display the detections live (default: %(default)s)")
+    parser.add_argument("--interact_zone_tracking", "-izt", type=str, default="", help="Don't track the people but the zone to interact with, give a prompt at the beggining ([xmin, ymin, xmax, ymax] in pixels) and track from there (default: %(default)s)")
     # parser.add_argument("--ngpu", "-ngpu", type=int, default=0, help="Number of GPUs to use, default 0 means use all GPUs")
     args = parser.parse_args()
 

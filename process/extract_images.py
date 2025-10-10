@@ -199,13 +199,13 @@ def main(args):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video_path", "-v", type=str, default="./demo/data/2025_06_13_11_15_31_Theta360.mkv")
-    parser.add_argument("--save_dir", "-s", type=str, default="./demo/output")
-    parser.add_argument("--framerate", "-f", type=int, default=15)
-    parser.add_argument("--workers", "-w", type=int, default=0, help="Number of cores to use for parallel processing. Default: 0 (use half of available cores)") 
-    parser.add_argument("--episodes_method", "-em", type=str, default="single", help="Method to use to create episodes : single, time, detection")
-    parser.add_argument("--max_episodes_time", "-met", type=int, default=300, help="Max time in seconds to create episodes, does not apply if method is single")
-    parser.add_argument("--file_start_timestamp", "-fst", type=str, default="birthtime", help="File start timestamp in the format YYYY_MM_DD_HH_MM_SS_XXXXX, default is using file birthtime")
+    parser.add_argument("--video_path", "-v", type=str, default="./demo/data/2025_06_13_11_15_31_Theta360.mkv", help="Video path to extract images from (default: %(default)s)")
+    parser.add_argument("--save_dir", "-s", type=str, default="./demo/output", help="Save directory for the extracted images (default: %(default)s)")
+    parser.add_argument("--framerate", "-f", type=int, default=15, help="Framerate to extract images from (default: %(default)s)")
+    parser.add_argument("--workers", "-w", type=int, default=0, help="Number of cores to use for parallel processing. Default: 0 (use half of available cores) (default: %(default)s)") 
+    parser.add_argument("--episodes_method", "-em", type=str, default="single", help="Method to use to create episodes : single, time, detection (default: %(default)s)")
+    parser.add_argument("--max_episodes_time", "-met", type=int, default=300, help="Max time in seconds to create episodes, does not apply if meth  od is single (default: %(default)s)")
+    parser.add_argument("--file_start_timestamp", "-fst", type=str, default="birthtime", help="File start timestamp in the format YYYY_MM_DD_HH_MM_SS_XXXXX, default is using file birthtime (default: %(default)s)")
     args = parser.parse_args()
     
     if args.episodes_method == "single":

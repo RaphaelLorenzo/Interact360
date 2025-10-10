@@ -55,10 +55,10 @@ def main(args, episode: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360")
-    parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all'")
-    parser.add_argument("--fov", "-fov", type=float, default=90, help="Field of view in degrees")
-    parser.add_argument("--extract_at_idxs", "-eai", type=str, default="100", help="Indexes to extract, separated by commas or 'all'")
+    parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360", help="Directory to use (default: %(default)s)")
+    parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all' (default: %(default)s)")
+    parser.add_argument("--fov", "-fov", type=float, default=90, help="Field of view in degrees (default: %(default)s)")
+    parser.add_argument("--extract_at_idxs", "-eai", type=str, default="100", help="Indexes to extract, separated by commas or 'all' (default: %(default)s)")
 
     args = parser.parse_args()
     

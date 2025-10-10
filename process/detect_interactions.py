@@ -82,9 +82,9 @@ def main(args, episode: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360")
-    parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all'")
-    parser.add_argument("--intersection_mask_path", "-imp", type=str, default="./assets/default_mask_intersection_zone.png")
+    parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360", help="Directory to use (default: %(default)s)")
+    parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all' (default: %(default)s)")
+    parser.add_argument("--intersection_mask_path", "-imp", type=str, default="./assets/default_mask_intersection_zone.png", help="Intersection mask path (default: %(default)s)")
     args = parser.parse_args()
     
     assert os.path.isdir(args.dir), "Directory should exist at {}".format(args.dir)
