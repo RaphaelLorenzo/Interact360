@@ -704,6 +704,7 @@ class Interact360Visualizer(QMainWindow):
                 detections_list = read_json_to_dic(detection_file)
                 self.detections = self.convert_detections_list_to_dict(detections_list)
                 self.extract_plot_data(detections_list)
+                prInfo(f"Loaded {len(detections_list)} detections, {len(self.detections)} detection frames")
             else:
                 self.detections = {}
                 self.track_engagement_data = {}
@@ -752,23 +753,13 @@ class Interact360Visualizer(QMainWindow):
         """Convert detections list format to indexed dictionary format"""
         detections_dict = {}
         
-        # Create a mapping from image filename to index
-        image_name_to_index = {}
-        for i, image_path in enumerate(self.image_files):
-            image_name = os.path.basename(image_path)
-            image_name_to_index[image_name] = i
+        assert(len(detections_list) == len(self.image_files)), "Number of detections and images should be the same"
         
-        # Convert list to dictionary indexed by image index
-        for detection_entry in detections_list:
-            image_file = detection_entry.get("image_file", "")
-            image_name = os.path.basename(image_file)
-            
-            if image_name in image_name_to_index:
-                image_index = image_name_to_index[image_name]
-                detections_dict[image_index] = {
-                    "image_file": image_file,
-                    "detections": detection_entry.get("detections", [])
-                }
+        for i, detection_entry in enumerate(detections_list):
+            detections_dict[i] = {
+                "image_file": detection_entry.get("image_file", ""),
+                "detections": detection_entry.get("detections", [])
+            }
         
         return detections_dict
     
@@ -777,18 +768,9 @@ class Interact360Visualizer(QMainWindow):
         self.track_engagement_data = {}
         self.track_mask_size_data = {}
         
-        # Create a mapping from image filename to frame index
-        image_name_to_index = {}
-        for i, image_path in enumerate(self.image_files):
-            image_name = os.path.basename(image_path)
-            image_name_to_index[image_name] = i
-        
-        for detection_entry in detections_list:
-            image_file = detection_entry.get("image_file", "")
-            image_name = os.path.basename(image_file)
-            
-            if image_name in image_name_to_index:
-                frame_index = image_name_to_index[image_name]
+        for i, detection_entry in enumerate(detections_list):
+            if True:
+                frame_index = i
                 
                 for detection in detection_entry.get("detections", []):
                     track_id = detection.get("track_id", -1)
@@ -1004,8 +986,17 @@ class Interact360Visualizer(QMainWindow):
                 if (self.selected_track is not None and self.selected_track == track_id):
                     thickness = 4  # Thicker for selected track
                     
-                x1, y1, x2, y2 = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
-                cv2.rectangle(image_copy, (x1, y1), (x2, y2), color, thickness)
+                xmin, ymin, xmax, ymax = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
+                if xmax > image_copy.shape[1]:
+                    if xmin > image_copy.shape[1]:
+                        # fully outside
+                        cv2.rectangle(image_copy, (xmin-image_copy.shape[1], ymin), (xmax-image_copy.shape[1], ymax), color, thickness)
+                    else:
+                        # two sides
+                        cv2.rectangle(image_copy, (xmin, ymin), (image_copy.shape[1], ymax), color, thickness)
+                        cv2.rectangle(image_copy, (0, ymin), (xmax-image_copy.shape[1], ymax), color, thickness)
+                else:
+                    cv2.rectangle(image_copy, (xmin, ymin), (xmax, ymax), color, thickness)
             
             # Draw track ID if enabled
             if self.show_track_ids:
@@ -1015,6 +1006,8 @@ class Interact360Visualizer(QMainWindow):
                 
                 text = f"ID: {track_id}"
                 x1 = int(det["xmin"])
+                if x1 > image_copy.shape[1]:
+                    x1 = x1 - image_copy.shape[1]
                 y1 = int(det["ymin"])
                 
                 text_size = cv2.getTextSize(text, font, font_scale, font_thickness)[0]
