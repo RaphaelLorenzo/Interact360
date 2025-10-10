@@ -80,3 +80,4 @@ ultralytics==8.3.133
 # qreader==3.16
 PyQt6 
 pyqtgraph
+transformers
