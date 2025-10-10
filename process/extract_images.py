@@ -190,9 +190,10 @@ def main(args):
         # create episodes based on detection
         raise NotImplementedError("Not implemented")
 
-    shutil.rmtree(output_path)
-    prSuccess(f"Removed temporary images directory {output_path}")
-    
+    if os.path.exists(output_path):
+        shutil.rmtree(output_path)
+        prSuccess(f"Removed temporary images directory {output_path}")
+        
     write_dic_to_json_file(episodes_metadata, os.path.join(output_dir, "episodes.json"))
     
     return
