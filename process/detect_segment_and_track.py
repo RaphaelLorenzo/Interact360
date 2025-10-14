@@ -25,6 +25,10 @@ from misc.print_utils import *
 from misc.other_utils import *
 from misc.rle_tools import encode_RLE, decode_RLE
 
+import warnings
+# filter UserWarnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
 SAM2_MODEL_TO_CHECKPOINT = {
     "tiny": os.path.join(here, "../", "checkpoints/sam2.1_hiera_tiny.pt"),
     "tiny_512": os.path.join(here, "../", "checkpoints/sam2.1_hiera_tiny.pt"),
@@ -517,7 +521,12 @@ def filter_isolated_detections(detections, window_size = 5, min_element_in_windo
 
     return detections
 
-def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImagePredictor, vitpose_image_processor: AutoProcessor, vitpose_model: VitPoseForPoseEstimation, episode: str):
+
+UPDATED_INTERACT_ZONE_PROMPT = None
+
+def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImagePredictor, vitpose_image_processor: AutoProcessor, vitpose_model: VitPoseForPoseEstimation, episode: str, interact_zone_prompt: list = None):
+
+    global UPDATED_INTERACT_ZONE_PROMPT
 
     # Load image list
     images_path = os.path.join(args.dir, "episodes", episode, "images_360")
@@ -534,11 +543,6 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
 
     if args.interact_zone_tracking != "":
         
-        # Use a prompt for the first bbox provided in the args
-        interact_zone_prompt = args.interact_zone_tracking.split(",")
-        assert len(interact_zone_prompt) == 4, "Interact zone prompt should be 4 values separated by commas"
-        interact_zone_prompt = [int(x) for x in interact_zone_prompt]
-        prInfo(f"Using interact zone prompt : {interact_zone_prompt} for the first image")
         yolo_detections_output = []
         for image_idx in range(0, len(images_list)):
             current_image_detections = {"image_file": os.path.basename(images_list[image_idx]), "detections": []}
@@ -709,265 +713,268 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         exit(0)
                     cv2.destroyAllWindows()
     
-    filtered_yolo_detections_output = []
-    for image_idx, image_file in tqdm(enumerate(images_list), desc="Processing input images (image segmentation and first filtering)"):
-        
-        
-        # if os.path.exists("filtered_yolo_detections_output.pkl"):
-        #     print("DEBUG : SKIPPING FILTERING")
-        #     continue
-        
-        # skip images for track initialization !
-        if image_idx % args.track_initialization_skip_n_images != 0:
-            filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
-            continue
-        
-        yolo_detections_in_image = yolo_detections_output[image_idx]["detections"]
-        
-        # skip image if no detections
-        if len(yolo_detections_in_image) == 0:
-            prWarning("No detections in image : {}, skipping".format(image_file))
-            filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
-            continue
-
-        # Load the full image        
-        image = Image.open(image_file)
-        image = np.array(image)
-        if args.display:
-            centered_images_show = []
-            main_image_show = image.copy()
-            main_image_show = cv2.cvtColor(main_image_show, cv2.COLOR_RGB2BGR)
-            main_image_show = cv2.putText(main_image_show, f"Image {image_idx+1} / {len(images_list)}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
-
-        # create a list of valid detections images and boxes centered for the current image, to split it into batches
-        valid_detections_images_centered_for_current_image = []
-        valid_detections_boxes_centered_for_current_image = []
-        valid_centered_image_xmins_for_current_image = []
-        valid_detections_yolo_idxs_for_current_image = []
-        for yolo_detection_idx, yolo_detection in enumerate(yolo_detections_in_image):
+    if args.interact_zone_tracking != "":
+        filtered_yolo_detections_output = yolo_detections_output
+    else:
+        filtered_yolo_detections_output = []
+        for image_idx, image_file in tqdm(enumerate(images_list), desc="Processing input images (image segmentation and first filtering)"):
             
-            xmin, xmax, ymin, ymax = yolo_detection["xmin"], yolo_detection["xmax"], yolo_detection["ymin"], yolo_detection["ymax"]
-            detection_width_prop_full_image = (xmax - xmin) / image.shape[1]
-            detection_height_prop_full_image = (ymax - ymin) / image.shape[0]
-            validity = yolo_detection["validity"]
-            confidence = yolo_detection["confidence"]
+            
+            # if os.path.exists("filtered_yolo_detections_output.pkl"):
+            #     print("DEBUG : SKIPPING FILTERING")
+            #     continue
+            
+            # skip images for track initialization !
+            if image_idx % args.track_initialization_skip_n_images != 0:
+                filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
+                continue
+            
+            yolo_detections_in_image = yolo_detections_output[image_idx]["detections"]
+            
+            # skip image if no detections
+            if len(yolo_detections_in_image) == 0:
+                prWarning("No detections in image : {}, skipping".format(image_file))
+                filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
+                continue
+
+            # Load the full image        
+            image = Image.open(image_file)
+            image = np.array(image)
             if args.display:
-                color = COLORS_SEQUENCE_BGR[yolo_detection_idx % len(COLORS_SEQUENCE_BGR)]
+                centered_images_show = []
+                main_image_show = image.copy()
+                main_image_show = cv2.cvtColor(main_image_show, cv2.COLOR_RGB2BGR)
+                main_image_show = cv2.putText(main_image_show, f"Image {image_idx+1} / {len(images_list)}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+
+            # create a list of valid detections images and boxes centered for the current image, to split it into batches
+            valid_detections_images_centered_for_current_image = []
+            valid_detections_boxes_centered_for_current_image = []
+            valid_centered_image_xmins_for_current_image = []
+            valid_detections_yolo_idxs_for_current_image = []
+            for yolo_detection_idx, yolo_detection in enumerate(yolo_detections_in_image):
                 
-                det_text_1 = f"{yolo_detection_idx} | {validity} | {confidence*100:.0f}%"
-                det_text_2 = f"{detection_width_prop_full_image * 100:.2f}% | {detection_height_prop_full_image * 100:.2f}%"
-                # to draw the box even if on both ends of the image
-                if xmax > main_image_show.shape[1]:
-                    if xmin > main_image_show.shape[1]:
-                        # fully outside
-                        cv2.rectangle(main_image_show, (xmin-main_image_show.shape[1], ymin), (xmax-main_image_show.shape[1], ymax), color, 2)
-                        cv2.putText(main_image_show, det_text_1, (xmin-main_image_show.shape[1], ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
-                        cv2.putText(main_image_show, det_text_2, (xmin-main_image_show.shape[1], ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
+                xmin, xmax, ymin, ymax = yolo_detection["xmin"], yolo_detection["xmax"], yolo_detection["ymin"], yolo_detection["ymax"]
+                detection_width_prop_full_image = (xmax - xmin) / image.shape[1]
+                detection_height_prop_full_image = (ymax - ymin) / image.shape[0]
+                validity = yolo_detection["validity"]
+                confidence = yolo_detection["confidence"]
+                if args.display:
+                    color = COLORS_SEQUENCE_BGR[yolo_detection_idx % len(COLORS_SEQUENCE_BGR)]
+                    
+                    det_text_1 = f"{yolo_detection_idx} | {validity} | {confidence*100:.0f}%"
+                    det_text_2 = f"{detection_width_prop_full_image * 100:.2f}% | {detection_height_prop_full_image * 100:.2f}%"
+                    # to draw the box even if on both ends of the image
+                    if xmax > main_image_show.shape[1]:
+                        if xmin > main_image_show.shape[1]:
+                            # fully outside
+                            cv2.rectangle(main_image_show, (xmin-main_image_show.shape[1], ymin), (xmax-main_image_show.shape[1], ymax), color, 2)
+                            cv2.putText(main_image_show, det_text_1, (xmin-main_image_show.shape[1], ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
+                            cv2.putText(main_image_show, det_text_2, (xmin-main_image_show.shape[1], ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
+                        else:
+                            # two sides
+                            cv2.rectangle(main_image_show, (xmin, ymin), (main_image_show.shape[1], ymax), color, 2)
+                            cv2.rectangle(main_image_show, (0, ymin), (xmax-main_image_show.shape[1], ymax), color, 2)  
+                            cv2.putText(main_image_show, det_text_1, (xmin, ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
+                            cv2.putText(main_image_show, det_text_2, (xmin, ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
                     else:
-                        # two sides
-                        cv2.rectangle(main_image_show, (xmin, ymin), (main_image_show.shape[1], ymax), color, 2)
-                        cv2.rectangle(main_image_show, (0, ymin), (xmax-main_image_show.shape[1], ymax), color, 2)  
+                        cv2.rectangle(main_image_show, (xmin, ymin), (xmax, ymax), color, 2)                    
                         cv2.putText(main_image_show, det_text_1, (xmin, ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
                         cv2.putText(main_image_show, det_text_2, (xmin, ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
-                else:
-                    cv2.rectangle(main_image_show, (xmin, ymin), (xmax, ymax), color, 2)                    
-                    cv2.putText(main_image_show, det_text_1, (xmin, ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
-                    cv2.putText(main_image_show, det_text_2, (xmin, ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
 
-            # skip detection if not valid already
-            if validity != "valid":
+                # skip detection if not valid already
+                if validity != "valid":
+                    continue
+                
+                # skip detection if too small
+                if detection_width_prop_full_image < (MIN_BOX_SIZE_WIDTH_PROP_OF_CENTERED_IMAGE/2) or detection_height_prop_full_image < (MIN_BOX_SIZE_HEIGHT_PROP_OF_CENTERED_IMAGE/2):
+                    # allow half the normal size because we are comparing against a full image !
+                    continue
+                
+                yolo_detection_box = [xmin, ymin, xmax, ymax]
+                image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, [yolo_detection["xmin"], yolo_detection["ymin"], yolo_detection["xmax"], yolo_detection["ymax"]]) # only cropping supported for now
+
+                valid_detections_images_centered_for_current_image.append(image_centered)
+                valid_detections_boxes_centered_for_current_image.append(box_in_image_centered)
+                valid_centered_image_xmins_for_current_image.append(centered_image_xmin)
+                valid_detections_yolo_idxs_for_current_image.append(yolo_detection_idx)
+
+            # skip image if not valid detections
+            if len(valid_detections_images_centered_for_current_image) == 0:
+                prWarning("No valid detections in image : {}, skipping".format(image_file))
+                filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
                 continue
+                    
+            # Predict the SAM2 image segmentation masks batch by batch
+            n_batch_for_image = len(valid_detections_images_centered_for_current_image) // args.sam2_image_batch_size + 1
+            valid_detections_processed_for_current_image = {} 
+            # Dict of dicts with keys : 
+            # {yolo_idx : {
+                # "mask_rle_in_global_image": XX, 
+                # "mask_area_prop_in_centered_image": XX, 
+                # "mask_pixels_in_global_image": XX, 
+                # "mask_shape_in_global_image": XX, 
+                # "vitpose_keypoints_in_global_image": XX, 
+                # "vitpose_scores": XX,
+                # "vitpose_kp_in_mask": XX,
+                # "vitpose_valid_keypoints": XX,
+                # "vitpose_valid_keypoints_in_mask": XX}, ...}
             
-            # skip detection if too small
-            if detection_width_prop_full_image < (MIN_BOX_SIZE_WIDTH_PROP_OF_CENTERED_IMAGE/2) or detection_height_prop_full_image < (MIN_BOX_SIZE_HEIGHT_PROP_OF_CENTERED_IMAGE/2):
-                # allow half the normal size because we are comparing against a full image !
-                continue
-            
-            yolo_detection_box = [xmin, ymin, xmax, ymax]
-            image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, [yolo_detection["xmin"], yolo_detection["ymin"], yolo_detection["xmax"], yolo_detection["ymax"]]) # only cropping supported for now
-
-            valid_detections_images_centered_for_current_image.append(image_centered)
-            valid_detections_boxes_centered_for_current_image.append(box_in_image_centered)
-            valid_centered_image_xmins_for_current_image.append(centered_image_xmin)
-            valid_detections_yolo_idxs_for_current_image.append(yolo_detection_idx)
-
-        # skip image if not valid detections
-        if len(valid_detections_images_centered_for_current_image) == 0:
-            prWarning("No valid detections in image : {}, skipping".format(image_file))
-            filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
-            continue
+            for batch_idx in range(n_batch_for_image):
+                batch_images_centered = valid_detections_images_centered_for_current_image[batch_idx*args.sam2_image_batch_size:(batch_idx+1)*args.sam2_image_batch_size]
+                batch_boxes_centered = valid_detections_boxes_centered_for_current_image[batch_idx*args.sam2_image_batch_size:(batch_idx+1)*args.sam2_image_batch_size] # [ [xmin, ymin, xmax, ymax], [xmin, ymin, xmax, ymax], ...]
+                batch_centered_image_xmins = valid_centered_image_xmins_for_current_image[batch_idx*args.sam2_image_batch_size:(batch_idx+1)*args.sam2_image_batch_size]
+                batch_yolo_idxs = valid_detections_yolo_idxs_for_current_image[batch_idx*args.sam2_image_batch_size:(batch_idx+1)*args.sam2_image_batch_size]
+                batch_vitpose_results = [] # list of dict, [{"keypoints": [NKP, 2], "scores": [NKP]}, ...]
+                if len(batch_images_centered) == 0:
+                    continue
                 
-        # Predict the SAM2 image segmentation masks batch by batch
-        n_batch_for_image = len(valid_detections_images_centered_for_current_image) // args.sam2_image_batch_size + 1
-        valid_detections_processed_for_current_image = {} 
-        # Dict of dicts with keys : 
-        # {yolo_idx : {
-            # "mask_rle_in_global_image": XX, 
-            # "mask_area_prop_in_centered_image": XX, 
-            # "mask_pixels_in_global_image": XX, 
-            # "mask_shape_in_global_image": XX, 
-            # "vitpose_keypoints_in_global_image": XX, 
-            # "vitpose_scores": XX,
-            # "vitpose_kp_in_mask": XX,
-            # "vitpose_valid_keypoints": XX,
-            # "vitpose_valid_keypoints_in_mask": XX}, ...}
+                image_predictor.set_image_batch(batch_images_centered)
+                masks_batch, scores_batch, _ = image_predictor.predict_batch(None, None, box_batch=batch_boxes_centered, multimask_output=False, return_torch_tensors=True)
+                
+                # Pose estimation with ViTPose (in centered images coordinates)
+                
+                vitpose_boxes = [ [[box[0], box[1], box[2] - box[0], box[3] - box[1]]] for box in batch_boxes_centered] # [ [xmin, ymin, xmax, ymax], [xmin, ymin, xmax, ymax], ... ] -> [ [[xmin, ymin, width, height]], [[xmin, ymin, width, height]], ... ]
+                vitpose_inputs = vitpose_image_processor(batch_images_centered, boxes=vitpose_boxes, return_tensors="pt").to(torch.device("cuda:0"))
+                # print(vitpose_inputs["pixel_values"].shape) # torch.Size([4, 3, 256, 192]) [B, C, H, W] with B = len(batch_images_centered)
+            
+                with torch.no_grad():
+                    vitpose_outputs = vitpose_model(**vitpose_inputs)
+
+                vitpose_results = vitpose_image_processor.post_process_pose_estimation(vitpose_outputs, boxes=vitpose_boxes)  # list of list of dict, [ [{"keypoints": [NKP, 2], "scores": [NKP]}], [{"keypoints": [NKP, 2], "scores": [NKP]}], ...] (list inside is always of length 1, because we only have one box per image)
+                for vitpose_result in vitpose_results:
+                    batch_vitpose_results.append(vitpose_result[0])
+                    
+                #del vitpose_inputs, vitpose_outputs
+                #torch.cuda.empty_cache()
+                
+                for centered_input_image, centered_input_box, centered_image_masks, centered_image_xmin, yolo_idx, vitpose_result in zip(batch_images_centered, batch_boxes_centered, masks_batch, batch_centered_image_xmins, batch_yolo_idxs, batch_vitpose_results):
+                    centered_image_mask = (centered_image_masks[0] > 0.0) # torch.Tensor of shape H, W, dtype = torch.bool, device = cuda
+                    centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=ERODE_AND_DILATE_N_PIXELS)
+                    mask_area_prop_in_centered_image = centered_image_mask.sum() / (centered_input_image.shape[0] * centered_input_image.shape[1])
+                    
+                    full_image_mask = get_full_image_mask(centered_image_mask, centered_image_xmin, image.shape) # Mask of shape [H, W] (full image size)
+                    full_image_mask_rle = encode_RLE(full_image_mask) # 1D torch.Tensor
+
+                    vitpose_keypoints_in_global_image = get_full_image_keypoints(vitpose_result["keypoints"].cpu().numpy(), centered_image_xmin, image.shape)
+                    vitpose_valid_keypoints = 0
+                    vitpose_valid_keypoints_in_mask = 0
+                    vitpose_kp_in_mask = np.zeros_like(vitpose_result["scores"])
+                    for kpidx, kp, score in zip(range(len(vitpose_keypoints_in_global_image)), vitpose_keypoints_in_global_image, vitpose_result["scores"]):
+                        if score >= 0.5:
+                            vitpose_valid_keypoints += 1
+                            if full_image_mask[int(kp[1]), int(kp[0])]:
+                                vitpose_valid_keypoints_in_mask += 1    
+                                vitpose_kp_in_mask[kpidx] = 1
+
+                    if args.display:
+                        color = COLORS_SEQUENCE_BGR[yolo_idx % len(COLORS_SEQUENCE_BGR)]
+                        input_image_show = centered_input_image.copy()
+                        input_image_show = cv2.cvtColor(input_image_show, cv2.COLOR_RGB2BGR)
+                        mask_show = centered_image_mask.cpu().numpy()
+                        mask_show = (mask_show * 255.0).astype(np.uint8)
+                        mask_show = cv2.cvtColor(mask_show, cv2.COLOR_GRAY2BGR)
+                        input_image_show = cv2.addWeighted(input_image_show, 0.3, mask_show, 0.7, 0)
+                        input_image_show = cv2.rectangle(input_image_show, (centered_input_box[0], centered_input_box[1]), (centered_input_box[2], centered_input_box[3]), color, 3)
+                        
+                        cv2.putText(input_image_show, f"Image {image_idx+1} / {len(images_list)}, batch {batch_idx+1} / {n_batch_for_image}, yolo_idx : {yolo_idx}", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 2.0, color, 5)
+                        validkpcolor = (0, 255, 0) if vitpose_valid_keypoints > MIN_VITPOSE_VALID and vitpose_valid_keypoints_in_mask > MIN_VITPOSE_VALID_IN_MASK else (0, 0, 255)
+                        cv2.putText(input_image_show, f"valid_keypoints : {vitpose_valid_keypoints} / valid_keypoints_in_mask : {vitpose_valid_keypoints_in_mask}", (200, 300), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validkpcolor, 5)
+                        validmasksizecolor = (0, 255, 0) if mask_area_prop_in_centered_image > MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE else (0, 0, 255)
+                        cv2.putText(input_image_show, f"mask_area : {mask_area_prop_in_centered_image * 100:.2f}%", (200, 400), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validmasksizecolor, 5)
+                        for kp, score in zip(vitpose_result["keypoints"], vitpose_result["scores"]):
+                            if score < 0.5:
+                                cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
+                            else:
+                                cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
+                        
+                        centered_images_show.append(input_image_show)
+
+                        full_image_mask_show = main_image_show.copy()
+                        full_image_mask_show[full_image_mask.cpu().numpy()] = 255
+                        full_image_mask_show = full_image_mask_show.astype(np.uint8)
+                        
+                        for kp, score in zip(vitpose_keypoints_in_global_image, vitpose_result["scores"]):
+                            if score < 0.5:
+                                cv2.circle(full_image_mask_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
+                            else:
+                                cv2.circle(full_image_mask_show, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
+                        
+                        main_image_show = cv2.addWeighted(main_image_show, 0.5, full_image_mask_show, 0.5, 0)
+                        
+                        
+                    valid_detections_processed_for_current_image[yolo_idx] = {"mask_rle_in_global_image": full_image_mask_rle,
+                                                                                "mask_area_prop_in_centered_image": mask_area_prop_in_centered_image,
+                                                                                "mask_pixels_in_global_image": full_image_mask.sum(),
+                                                                                "mask_shape_in_global_image": full_image_mask.shape,
+                                                                                "vitpose_keypoints_in_global_image": vitpose_keypoints_in_global_image,
+                                                                                "vitpose_scores": vitpose_result["scores"],
+                                                                                "vitpose_kp_in_mask": vitpose_kp_in_mask,
+                                                                                "vitpose_valid_keypoints": vitpose_valid_keypoints,
+                                                                                "vitpose_valid_keypoints_in_mask": vitpose_valid_keypoints_in_mask}
+            
+            filtered_yolo_detections_output_current_detections = []
+            for yolo_idx, detection_processed in valid_detections_processed_for_current_image.items():
+                original_yolo_detection = yolo_detections_in_image[yolo_idx]
+                
+                mask_rle_in_global_image = detection_processed["mask_rle_in_global_image"]
+                mask_area_prop_in_centered_image = detection_processed["mask_area_prop_in_centered_image"]
+                mask_pixels_in_global_image = detection_processed["mask_pixels_in_global_image"]
+                mask_shape_in_global_image = detection_processed["mask_shape_in_global_image"]
+                vitpose_keypoints_in_global_image = detection_processed["vitpose_keypoints_in_global_image"]
+                vitpose_scores = detection_processed["vitpose_scores"]
+                vitpose_kp_in_mask = detection_processed["vitpose_kp_in_mask"]
+                vitpose_valid_keypoints = detection_processed["vitpose_valid_keypoints"]
+                vitpose_valid_keypoints_in_mask = detection_processed["vitpose_valid_keypoints_in_mask"]
+                
+                # Add some filtering here !
+                if mask_area_prop_in_centered_image > MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE and vitpose_valid_keypoints > MIN_VITPOSE_VALID and vitpose_valid_keypoints_in_mask > MIN_VITPOSE_VALID_IN_MASK:
+                    
+                    original_yolo_detection["mask_rle"] = mask_rle_in_global_image
+                    original_yolo_detection["mask_area_prop_in_centered_image"] = mask_area_prop_in_centered_image
+                    original_yolo_detection["mask_pixels_in_global_image"] = mask_pixels_in_global_image
+                    original_yolo_detection["mask_shape"] = mask_shape_in_global_image
+                    original_yolo_detection["vitpose_keypoints_in_global_image"] = vitpose_keypoints_in_global_image
+                    original_yolo_detection["vitpose_scores"] = vitpose_scores
+                    original_yolo_detection["vitpose_kp_in_mask"] = vitpose_kp_in_mask
+                    original_yolo_detection["vitpose_valid_keypoints"] = vitpose_valid_keypoints
+                    original_yolo_detection["vitpose_valid_keypoints_in_mask"] = vitpose_valid_keypoints_in_mask
+                    
+                    filtered_yolo_detections_output_current_detections.append(original_yolo_detection)
+            
+            filtered_yolo_detections_output.append({"image_file": image_file, "detections": filtered_yolo_detections_output_current_detections})
+            
+            if args.display:
+                
+                # show main image
+                main_image_show = cv2.resize(main_image_show, (1920, 960)) # resize for display
+                cv2.imshow("SAM2 Image Initial Segmentation", main_image_show)
+                key = cv2.waitKey(100)
+                if key == ord('q') or key == 27:
+                    exit(0)
+                    
+                # show a mosaic of up to 16 images centered
+                centered_images_show = [cv2.resize(centered_image_show, (480, 480)) for centered_image_show in centered_images_show]
+                mosaic_image_show = np.zeros((1920, 1920, 3), dtype=np.uint8)
+                for i in range(min(len(centered_images_show), 16)):
+                    row = i // 4
+                    col = i % 4
+                    mosaic_image_show[row*480:(row+1)*480, col*480:(col+1)*480, :] = centered_images_show[i]
+                    #add thin separations
+                    mosaic_image_show[row*480:row*480+10, col*480:(col+1)*480, :] = 0
+                    mosaic_image_show[(row+1)*480-10:(row+1)*480, col*480:(col+1)*480, :] = 0
+                    mosaic_image_show[row*480:(row+1)*480, col*480:col*480+10, :] = 0
+                    mosaic_image_show[row*480:(row+1)*480, (col+1)*480-10:(col+1)*480, :] = 0
+
+                cv2.imshow("Mosaic of centered images", mosaic_image_show)
+                key = cv2.waitKey(100)
+                if key == ord('q') or key == 27:
+                    exit(0)
         
-        for batch_idx in range(n_batch_for_image):
-            batch_images_centered = valid_detections_images_centered_for_current_image[batch_idx*args.sam2_image_batch_size:(batch_idx+1)*args.sam2_image_batch_size]
-            batch_boxes_centered = valid_detections_boxes_centered_for_current_image[batch_idx*args.sam2_image_batch_size:(batch_idx+1)*args.sam2_image_batch_size] # [ [xmin, ymin, xmax, ymax], [xmin, ymin, xmax, ymax], ...]
-            batch_centered_image_xmins = valid_centered_image_xmins_for_current_image[batch_idx*args.sam2_image_batch_size:(batch_idx+1)*args.sam2_image_batch_size]
-            batch_yolo_idxs = valid_detections_yolo_idxs_for_current_image[batch_idx*args.sam2_image_batch_size:(batch_idx+1)*args.sam2_image_batch_size]
-            batch_vitpose_results = [] # list of dict, [{"keypoints": [NKP, 2], "scores": [NKP]}, ...]
-            if len(batch_images_centered) == 0:
-                continue
-            
-            image_predictor.set_image_batch(batch_images_centered)
-            masks_batch, scores_batch, _ = image_predictor.predict_batch(None, None, box_batch=batch_boxes_centered, multimask_output=False, return_torch_tensors=True)
-            
-            # Pose estimation with ViTPose (in centered images coordinates)
-            
-            vitpose_boxes = [ [[box[0], box[1], box[2] - box[0], box[3] - box[1]]] for box in batch_boxes_centered] # [ [xmin, ymin, xmax, ymax], [xmin, ymin, xmax, ymax], ... ] -> [ [[xmin, ymin, width, height]], [[xmin, ymin, width, height]], ... ]
-            vitpose_inputs = vitpose_image_processor(batch_images_centered, boxes=vitpose_boxes, return_tensors="pt").to(torch.device("cuda:0"))
-            # print(vitpose_inputs["pixel_values"].shape) # torch.Size([4, 3, 256, 192]) [B, C, H, W] with B = len(batch_images_centered)
-           
-            with torch.no_grad():
-                vitpose_outputs = vitpose_model(**vitpose_inputs)
-
-            vitpose_results = vitpose_image_processor.post_process_pose_estimation(vitpose_outputs, boxes=vitpose_boxes)  # list of list of dict, [ [{"keypoints": [NKP, 2], "scores": [NKP]}], [{"keypoints": [NKP, 2], "scores": [NKP]}], ...] (list inside is always of length 1, because we only have one box per image)
-            for vitpose_result in vitpose_results:
-                batch_vitpose_results.append(vitpose_result[0])
-                
-            #del vitpose_inputs, vitpose_outputs
-            #torch.cuda.empty_cache()
-            
-            for centered_input_image, centered_input_box, centered_image_masks, centered_image_xmin, yolo_idx, vitpose_result in zip(batch_images_centered, batch_boxes_centered, masks_batch, batch_centered_image_xmins, batch_yolo_idxs, batch_vitpose_results):
-                centered_image_mask = (centered_image_masks[0] > 0.0) # torch.Tensor of shape H, W, dtype = torch.bool, device = cuda
-                centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=ERODE_AND_DILATE_N_PIXELS)
-                mask_area_prop_in_centered_image = centered_image_mask.sum() / (centered_input_image.shape[0] * centered_input_image.shape[1])
-                
-                full_image_mask = get_full_image_mask(centered_image_mask, centered_image_xmin, image.shape) # Mask of shape [H, W] (full image size)
-                full_image_mask_rle = encode_RLE(full_image_mask) # 1D torch.Tensor
-
-                vitpose_keypoints_in_global_image = get_full_image_keypoints(vitpose_result["keypoints"].cpu().numpy(), centered_image_xmin, image.shape)
-                vitpose_valid_keypoints = 0
-                vitpose_valid_keypoints_in_mask = 0
-                vitpose_kp_in_mask = np.zeros_like(vitpose_result["scores"])
-                for kpidx, kp, score in zip(range(len(vitpose_keypoints_in_global_image)), vitpose_keypoints_in_global_image, vitpose_result["scores"]):
-                    if score >= 0.5:
-                        vitpose_valid_keypoints += 1
-                        if full_image_mask[int(kp[1]), int(kp[0])]:
-                            vitpose_valid_keypoints_in_mask += 1    
-                            vitpose_kp_in_mask[kpidx] = 1
-
-                if args.display:
-                    color = COLORS_SEQUENCE_BGR[yolo_idx % len(COLORS_SEQUENCE_BGR)]
-                    input_image_show = centered_input_image.copy()
-                    input_image_show = cv2.cvtColor(input_image_show, cv2.COLOR_RGB2BGR)
-                    mask_show = centered_image_mask.cpu().numpy()
-                    mask_show = (mask_show * 255.0).astype(np.uint8)
-                    mask_show = cv2.cvtColor(mask_show, cv2.COLOR_GRAY2BGR)
-                    input_image_show = cv2.addWeighted(input_image_show, 0.3, mask_show, 0.7, 0)
-                    input_image_show = cv2.rectangle(input_image_show, (centered_input_box[0], centered_input_box[1]), (centered_input_box[2], centered_input_box[3]), color, 3)
-                    
-                    cv2.putText(input_image_show, f"Image {image_idx+1} / {len(images_list)}, batch {batch_idx+1} / {n_batch_for_image}, yolo_idx : {yolo_idx}", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 2.0, color, 5)
-                    validkpcolor = (0, 255, 0) if vitpose_valid_keypoints > MIN_VITPOSE_VALID and vitpose_valid_keypoints_in_mask > MIN_VITPOSE_VALID_IN_MASK else (0, 0, 255)
-                    cv2.putText(input_image_show, f"valid_keypoints : {vitpose_valid_keypoints} / valid_keypoints_in_mask : {vitpose_valid_keypoints_in_mask}", (200, 300), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validkpcolor, 5)
-                    validmasksizecolor = (0, 255, 0) if mask_area_prop_in_centered_image > MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE else (0, 0, 255)
-                    cv2.putText(input_image_show, f"mask_area : {mask_area_prop_in_centered_image * 100:.2f}%", (200, 400), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validmasksizecolor, 5)
-                    for kp, score in zip(vitpose_result["keypoints"], vitpose_result["scores"]):
-                        if score < 0.5:
-                            cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
-                        else:
-                            cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
-                    
-                    centered_images_show.append(input_image_show)
-
-                    full_image_mask_show = main_image_show.copy()
-                    full_image_mask_show[full_image_mask.cpu().numpy()] = 255
-                    full_image_mask_show = full_image_mask_show.astype(np.uint8)
-                    
-                    for kp, score in zip(vitpose_keypoints_in_global_image, vitpose_result["scores"]):
-                        if score < 0.5:
-                            cv2.circle(full_image_mask_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
-                        else:
-                            cv2.circle(full_image_mask_show, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
-                    
-                    main_image_show = cv2.addWeighted(main_image_show, 0.5, full_image_mask_show, 0.5, 0)
-                    
-                    
-                valid_detections_processed_for_current_image[yolo_idx] = {"mask_rle_in_global_image": full_image_mask_rle,
-                                                                            "mask_area_prop_in_centered_image": mask_area_prop_in_centered_image,
-                                                                            "mask_pixels_in_global_image": full_image_mask.sum(),
-                                                                            "mask_shape_in_global_image": full_image_mask.shape,
-                                                                            "vitpose_keypoints_in_global_image": vitpose_keypoints_in_global_image,
-                                                                            "vitpose_scores": vitpose_result["scores"],
-                                                                            "vitpose_kp_in_mask": vitpose_kp_in_mask,
-                                                                            "vitpose_valid_keypoints": vitpose_valid_keypoints,
-                                                                            "vitpose_valid_keypoints_in_mask": vitpose_valid_keypoints_in_mask}
-        
-        filtered_yolo_detections_output_current_detections = []
-        for yolo_idx, detection_processed in valid_detections_processed_for_current_image.items():
-            original_yolo_detection = yolo_detections_in_image[yolo_idx]
-            
-            mask_rle_in_global_image = detection_processed["mask_rle_in_global_image"]
-            mask_area_prop_in_centered_image = detection_processed["mask_area_prop_in_centered_image"]
-            mask_pixels_in_global_image = detection_processed["mask_pixels_in_global_image"]
-            mask_shape_in_global_image = detection_processed["mask_shape_in_global_image"]
-            vitpose_keypoints_in_global_image = detection_processed["vitpose_keypoints_in_global_image"]
-            vitpose_scores = detection_processed["vitpose_scores"]
-            vitpose_kp_in_mask = detection_processed["vitpose_kp_in_mask"]
-            vitpose_valid_keypoints = detection_processed["vitpose_valid_keypoints"]
-            vitpose_valid_keypoints_in_mask = detection_processed["vitpose_valid_keypoints_in_mask"]
-            
-            # Add some filtering here !
-            if mask_area_prop_in_centered_image > MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE and vitpose_valid_keypoints > MIN_VITPOSE_VALID and vitpose_valid_keypoints_in_mask > MIN_VITPOSE_VALID_IN_MASK:
-                
-                original_yolo_detection["mask_rle"] = mask_rle_in_global_image
-                original_yolo_detection["mask_area_prop_in_centered_image"] = mask_area_prop_in_centered_image
-                original_yolo_detection["mask_pixels_in_global_image"] = mask_pixels_in_global_image
-                original_yolo_detection["mask_shape"] = mask_shape_in_global_image
-                original_yolo_detection["vitpose_keypoints_in_global_image"] = vitpose_keypoints_in_global_image
-                original_yolo_detection["vitpose_scores"] = vitpose_scores
-                original_yolo_detection["vitpose_kp_in_mask"] = vitpose_kp_in_mask
-                original_yolo_detection["vitpose_valid_keypoints"] = vitpose_valid_keypoints
-                original_yolo_detection["vitpose_valid_keypoints_in_mask"] = vitpose_valid_keypoints_in_mask
-                
-                filtered_yolo_detections_output_current_detections.append(original_yolo_detection)
-        
-        filtered_yolo_detections_output.append({"image_file": image_file, "detections": filtered_yolo_detections_output_current_detections})
-        
-        if args.display:
-            
-            # show main image
-            main_image_show = cv2.resize(main_image_show, (1920, 960)) # resize for display
-            cv2.imshow("SAM2 Image Initial Segmentation", main_image_show)
-            key = cv2.waitKey(100)
-            if key == ord('q') or key == 27:
-                exit(0)
-                
-            # show a mosaic of up to 16 images centered
-            centered_images_show = [cv2.resize(centered_image_show, (480, 480)) for centered_image_show in centered_images_show]
-            mosaic_image_show = np.zeros((1920, 1920, 3), dtype=np.uint8)
-            for i in range(min(len(centered_images_show), 16)):
-                row = i // 4
-                col = i % 4
-                mosaic_image_show[row*480:(row+1)*480, col*480:(col+1)*480, :] = centered_images_show[i]
-                #add thin separations
-                mosaic_image_show[row*480:row*480+10, col*480:(col+1)*480, :] = 0
-                mosaic_image_show[(row+1)*480-10:(row+1)*480, col*480:(col+1)*480, :] = 0
-                mosaic_image_show[row*480:(row+1)*480, col*480:col*480+10, :] = 0
-                mosaic_image_show[row*480:(row+1)*480, (col+1)*480-10:(col+1)*480, :] = 0
-
-            cv2.imshow("Mosaic of centered images", mosaic_image_show)
-            key = cv2.waitKey(100)
-            if key == ord('q') or key == 27:
-                exit(0)
-    
-    # if os.path.exists("filtered_yolo_detections_output.pkl"):
-    #     filtered_yolo_detections_output = pickle.load(open("filtered_yolo_detections_output.pkl", "rb"))
-    #     print("LOADED FILTERED YOLO DETECTIONS OUTPUT FROM PICKLE")
-    # else:
-    #     pickle.dump(filtered_yolo_detections_output, open("filtered_yolo_detections_output.pkl", "wb"))
+        # if os.path.exists("filtered_yolo_detections_output.pkl"):
+        #     filtered_yolo_detections_output = pickle.load(open("filtered_yolo_detections_output.pkl", "rb"))
+        #     print("LOADED FILTERED YOLO DETECTIONS OUTPUT FROM PICKLE")
+        # else:
+        #     pickle.dump(filtered_yolo_detections_output, open("filtered_yolo_detections_output.pkl", "wb"))
         
     assert(len(filtered_yolo_detections_output) == len(images_list)), "Number of filtered detections and images should be the same got {} and {}".format(len(filtered_yolo_detections_output), len(images_list))
     
@@ -1001,47 +1008,55 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                 
                 # Check if the initial mask matches with any existing SAM2 track
                 yolo_detection_box = [yolo_detection["xmin"], yolo_detection["ymin"], yolo_detection["xmax"], yolo_detection["ymax"]]
-                current_mask = decode_RLE(yolo_detection["mask_rle"], shape = image.shape[:2])
-                matching_sam2_track = None
-                matching_sam2_track_detection_idx = None
-                for detection_comp_idx, detection_comp in enumerate(sam2_detections_output[image_idx]["detections"]):
-                    detection_comp_box = [detection_comp["xmin"], detection_comp["ymin"], detection_comp["xmax"], detection_comp["ymax"]]
-                    iou_boxes = bb_intersection_over_union_with_shift(yolo_detection_box, detection_comp_box, shift_test=image.shape[1])
-                    if iou_boxes > MIN_OVERLAP_IOU_BOXES:
-                        detection_comp_mask_rle = detection_comp["mask_rle"]
-                        detection_comp_mask = decode_RLE(detection_comp_mask_rle, shape = image.shape[:2])
-                        iou_masks = get_iou_torch(detection_comp_mask, current_mask)
-                        prop_of_mask_in_mask_comp = prop_of_mask1_in_mask2_torch(current_mask, detection_comp_mask) # check if current_mask is fully enclosed in detection_comp_mask
-                        if iou_masks > MIN_OVERLAP_IOU_MASKS or prop_of_mask_in_mask_comp > MIN_MASK_IN_MASK_COMP_PROP:
-                            matching_sam2_track = detection_comp["track_id"]
-                            matching_sam2_track_detection_idx = detection_comp_idx
-                            break
                 
-                if matching_sam2_track is not None:
-                    # prWarning(f"[{image_idx}][YOLO detection {yolo_detection_idx}] Matching SAM2 track {matching_sam2_track} (index {matching_sam2_track_detection_idx}) found. Do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
-                    continue
-                else:
-                    prSuccess(f"[{image_idx}][YOLO detection {yolo_detection_idx}] No matching SAM2 track found. Pursuing tracking from this detection starting at image {image_idx}. Assigned SAM2 track ID {current_sam2_track_id}")
+                if args.interact_zone_tracking == "":
+                    # Normal case
+                    current_mask = decode_RLE(yolo_detection["mask_rle"], shape = image.shape[:2])
+                    matching_sam2_track = None
+                    matching_sam2_track_detection_idx = None
+                    for detection_comp_idx, detection_comp in enumerate(sam2_detections_output[image_idx]["detections"]):
+                        detection_comp_box = [detection_comp["xmin"], detection_comp["ymin"], detection_comp["xmax"], detection_comp["ymax"]]
+                        iou_boxes = bb_intersection_over_union_with_shift(yolo_detection_box, detection_comp_box, shift_test=image.shape[1])
+                        if iou_boxes > MIN_OVERLAP_IOU_BOXES:
+                            detection_comp_mask_rle = detection_comp["mask_rle"]
+                            detection_comp_mask = decode_RLE(detection_comp_mask_rle, shape = image.shape[:2])
+                            iou_masks = get_iou_torch(detection_comp_mask, current_mask)
+                            prop_of_mask_in_mask_comp = prop_of_mask1_in_mask2_torch(current_mask, detection_comp_mask) # check if current_mask is fully enclosed in detection_comp_mask
+                            if iou_masks > MIN_OVERLAP_IOU_MASKS or prop_of_mask_in_mask_comp > MIN_MASK_IN_MASK_COMP_PROP:
+                                matching_sam2_track = detection_comp["track_id"]
+                                matching_sam2_track_detection_idx = detection_comp_idx
+                                break
                     
-                #### Start tracking from the initial frame ####
-                image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box) # only cropping supported for now
-                vitpose_keypoints_in_centered_image = get_centered_image_keypoints(yolo_detection["vitpose_keypoints_in_global_image"], centered_image_xmin, image_centered.shape)
-                if args.use_keypoints_prompt:
-                    # NOTE : it does not work so good especially since some keypoints often fall on the edge of the body
-                    points_prompt = []
-                    for kp, kp_in_mask, score in zip(vitpose_keypoints_in_centered_image, yolo_detection["vitpose_kp_in_mask"], yolo_detection["vitpose_scores"]):
-                        if kp_in_mask and score > 0.5:
-                            points_prompt.append([kp[0], kp[1]])
-                    points_prompt = np.array(points_prompt)
-                    points_prompt = torch.from_numpy(points_prompt)
-                    labels_prompt = torch.ones(points_prompt.shape[0], dtype=torch.int32) # all the same instance
-                    if points_prompt.shape[0] == 0:
+                    if matching_sam2_track is not None:
+                        # prWarning(f"[{image_idx}][YOLO detection {yolo_detection_idx}] Matching SAM2 track {matching_sam2_track} (index {matching_sam2_track_detection_idx}) found. Do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
+                        continue
+                    else:
+                        prSuccess(f"[{image_idx}][YOLO detection {yolo_detection_idx}] No matching SAM2 track found. Pursuing tracking from this detection starting at image {image_idx}. Assigned SAM2 track ID {current_sam2_track_id}")
+                        
+                    #### Start tracking from the initial frame ####
+                    image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box) # only cropping supported for now
+                    vitpose_keypoints_in_centered_image = get_centered_image_keypoints(yolo_detection["vitpose_keypoints_in_global_image"], centered_image_xmin, image_centered.shape)
+                    if args.use_keypoints_prompt:
+                        # NOTE : it does not work so good especially since some keypoints often fall on the edge of the body
+                        points_prompt = []
+                        for kp, kp_in_mask, score in zip(vitpose_keypoints_in_centered_image, yolo_detection["vitpose_kp_in_mask"], yolo_detection["vitpose_scores"]):
+                            if kp_in_mask and score > 0.5:
+                                points_prompt.append([kp[0], kp[1]])
+                        points_prompt = np.array(points_prompt)
+                        points_prompt = torch.from_numpy(points_prompt)
+                        labels_prompt = torch.ones(points_prompt.shape[0], dtype=torch.int32) # all the same instance
+                        if points_prompt.shape[0] == 0:
+                            points_prompt = None
+                            labels_prompt = None
+                    else:
                         points_prompt = None
                         labels_prompt = None
                 else:
+                    # when interact zone tracking is used, we do not need all these checks
+                    image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box) # only cropping supported for now
                     points_prompt = None
                     labels_prompt = None
-                        
+                    
                 # If the video predictor is initialized, reset it before starting a new track
                 if video_predictor_initialized:
                     prInfo("Resetting video predictor")
@@ -1244,14 +1259,19 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     
     # Filter isolated detections
     sam2_detections_output_list = filter_isolated_detections(sam2_detections_output_list)
+
+    assert(len(sam2_detections_output_list) == len(images_list)), "Number of detections and images should be the same"
         
     # Write the detections to a JSON file
     if args.interact_zone_tracking != "":
         write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "interact_zone_tracking_360.json"))
+        last_detection_element = sam2_detections_output_list[-1]["detections"]
+        assert(len(last_detection_element) == 1), f"There should be one and only one detection element (got {len(last_detection_element)})"
+        new_interact_zone_prompt = [last_detection_element[0]["xmin"], last_detection_element[0]["ymin"], last_detection_element[0]["xmax"], last_detection_element[0]["ymax"]]
+        prInfo(f"Updating interact zone prompt for the next episode from {interact_zone_prompt} to {new_interact_zone_prompt}")
+        UPDATED_INTERACT_ZONE_PROMPT = new_interact_zone_prompt
     else:
         write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json"))
-        
-    assert(len(sam2_detections_output_list) == len(images_list)), "Number of detections and images should be the same"
     
 
 if __name__ == "__main__":
@@ -1305,5 +1325,18 @@ if __name__ == "__main__":
     vitpose_model.to(torch.device("cuda:0"))
     prSuccess("ViTPose Image processor and model loaded")
     
+    if args.interact_zone_tracking != "":
+        # Use a prompt for the first bbox provided in the args
+        interact_zone_prompt = args.interact_zone_tracking.split(",")
+        assert len(interact_zone_prompt) == 4, "Interact zone prompt should be 4 values separated by commas"
+        interact_zone_prompt = [int(x) for x in interact_zone_prompt]
+        prInfo(f"Using interact zone prompt : {interact_zone_prompt} for the first image")
+    else:
+        interact_zone_prompt = None
+    
     for episode in episodes_list:
-        main(args, video_predictor, image_predictor, vitpose_image_processor, vitpose_model, episode)
+        main(args, video_predictor, image_predictor, vitpose_image_processor, vitpose_model, episode, interact_zone_prompt)
+
+        if args.interact_zone_tracking != "":
+            prInfo(f"Updated interact zone prompt for the next episode from {interact_zone_prompt} to {UPDATED_INTERACT_ZONE_PROMPT}")
+            interact_zone_prompt = UPDATED_INTERACT_ZONE_PROMPT
