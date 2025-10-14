@@ -1115,7 +1115,10 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     following_image_centered, following_box_in_image_centered, following_image_xmin, following_image_xmax = get_image_centered_on_detection(following_image, bbox_in_absolute_image, desired_width=desired_width)
                                         
                     # Find the mask in the following image
+                    tic = time.time()
                     out_obj_ids, out_mask_logits = video_predictor.track(following_image_centered)
+                    tac = time.time()
+                    prTimer(f"Track with SAM2", tic, tac)
                     centered_image_mask = (out_mask_logits[0, 0, :, :] > 0.0)
                     centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=ERODE_AND_DILATE_N_PIXELS)
                     if args.interact_zone_tracking != "":
