@@ -36,15 +36,12 @@ except ImportError:
     sys.exit(1)
 
 # Import pyqtgraph for plotting
-try:
-    import pyqtgraph as pg
-    from pyqtgraph import PlotWidget as PGPlotWidget
-    pg.setConfigOption('useOpenGL', False)
-    pg.setConfigOption('antialias', True)
-    PYQTGRAPH_AVAILABLE = True
-except ImportError:
-    prError("PyQtGraph not available. Please install with: pip install pyqtgraph")
-    PYQTGRAPH_AVAILABLE = False
+import pyqtgraph as pg
+from pyqtgraph import PlotWidget as PGPlotWidget
+pg.setConfigOption('useOpenGL', False)
+pg.setConfigOption('antialias', True)
+PYQTGRAPH_AVAILABLE = True
+
 
 
 class PlotWidget(QWidget):
@@ -406,18 +403,14 @@ class Interact360Visualizer(QMainWindow):
         interaction_mask_path = os.path.join(os.path.dirname(__file__), "assets", "default_mask_intersection_zone.png")
         
         if os.path.exists(interaction_mask_path):
-            try:
-                # Load mask as grayscale
-                mask_image = cv2.imread(interaction_mask_path, cv2.IMREAD_GRAYSCALE)
-                if mask_image is not None:
-                    # Convert to boolean mask (assuming white areas are interaction zones)
-                    self.interaction_mask = mask_image > 128
-                    prInfo(f"Loaded interaction mask: {interaction_mask_path} ({mask_image.shape})")
-                else:
-                    prWarning(f"Failed to load interaction mask image: {interaction_mask_path}")
-                    self.interaction_mask = None
-            except Exception as e:
-                prError(f"Error loading interaction mask: {e}")
+            # Load mask as grayscale
+            mask_image = cv2.imread(interaction_mask_path, cv2.IMREAD_GRAYSCALE)
+            if mask_image is not None:
+                # Convert to boolean mask (assuming white areas are interaction zones)
+                self.interaction_mask = mask_image > 128
+                prInfo(f"Loaded interaction mask: {interaction_mask_path} ({mask_image.shape})")
+            else:
+                prWarning(f"Failed to load interaction mask image: {interaction_mask_path}")
                 self.interaction_mask = None
         else:
             prWarning(f"Interaction mask not found: {interaction_mask_path}")
@@ -428,14 +421,10 @@ class Interact360Visualizer(QMainWindow):
         interact_zone_tracking_path = os.path.join(episode_dir, "interact_zone_tracking_360.json")
         
         if os.path.exists(interact_zone_tracking_path):
-            try:
-                self.interact_zone_tracking = read_json_to_dic(interact_zone_tracking_path)
-                prInfo(f"Loaded interact zone tracking: {interact_zone_tracking_path} with {len(self.interact_zone_tracking)} frames")
-                return True
-            except Exception as e:
-                prError(f"Error loading interact zone tracking: {e}")
-                self.interact_zone_tracking = None
-                return False
+            self.interact_zone_tracking = read_json_to_dic(interact_zone_tracking_path)
+            prInfo(f"Loaded interact zone tracking: {interact_zone_tracking_path} with {len(self.interact_zone_tracking)} frames")
+            return True
+
         else:
             prInfo(f"No interact zone tracking file found: {interact_zone_tracking_path}")
             self.interact_zone_tracking = None
@@ -707,48 +696,43 @@ class Interact360Visualizer(QMainWindow):
         
         prInfo(f"Loading episode: {session}/{episode}")
         
-        try:
-            # Load images
-            images_dir = os.path.join(episode_dir, "images_360")
-            self.image_files = self.get_image_files(images_dir)
-            
-            # Load detections
-            detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
-            if os.path.exists(detection_file):
-                detections_list = read_json_to_dic(detection_file)
-                detections_list = self.reorder_detections_list(detections_list)
-                self.detections = self.convert_detections_list_to_dict(detections_list)
-                self.extract_plot_data(detections_list)
-                prInfo(f"Loaded {len(detections_list)} detections, {len(self.detections)} detection frames")
-            else:
-                self.detections = {}
-                self.track_engagement_data = {}
-                self.track_mask_size_data = {}
-                prWarning(f"No detection file found: {detection_file}")
-            
-            # Load interact zone tracking if available
-            self.load_interact_zone_tracking(episode_dir)
-            
-            # Update UI
-            self.update_slider()
-            self.current_frame = 0
-            self.update_image_display()
-            self.update_track_list()
-            self.update_plots()
-            
-            # Update interaction UI availability
-            has_interaction_data = (self.interaction_mask is not None or self.interact_zone_tracking is not None)
-            self.show_interaction_highlights_cb.setEnabled(has_interaction_data)
-            self.show_interaction_zone_cb.setEnabled(has_interaction_data)
-            
-            status_msg = f"Loaded episode {session}/{episode} - {len(self.image_files)} frames, {len(self.detections)} detection frames"
-            self.statusBar().showMessage(status_msg)
-            prInfo(status_msg)
-            
-        except Exception as e:
-            error_msg = f"Failed to load episode data: {str(e)}"
-            QMessageBox.critical(self, "Error", error_msg)
-            prError(error_msg)
+        # Load images
+        images_dir = os.path.join(episode_dir, "images_360")
+        self.image_files = self.get_image_files(images_dir)
+        
+        # Load detections
+        detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
+        if os.path.exists(detection_file):
+            detections_list = read_json_to_dic(detection_file)
+            detections_list = self.reorder_detections_list(detections_list)
+            self.detections = self.convert_detections_list_to_dict(detections_list)
+            self.extract_plot_data(detections_list)
+            prInfo(f"Loaded {len(detections_list)} detections, {len(self.detections)} detection frames")
+        else:
+            self.detections = {}
+            self.track_engagement_data = {}
+            self.track_mask_size_data = {}
+            prWarning(f"No detection file found: {detection_file}")
+        
+        # Load interact zone tracking if available
+        self.load_interact_zone_tracking(episode_dir)
+        
+        # Update UI
+        self.update_slider()
+        self.current_frame = 0
+        self.update_image_display()
+        self.update_track_list()
+        self.update_plots()
+        
+        # Update interaction UI availability
+        has_interaction_data = (self.interaction_mask is not None or self.interact_zone_tracking is not None)
+        self.show_interaction_highlights_cb.setEnabled(has_interaction_data)
+        self.show_interaction_zone_cb.setEnabled(has_interaction_data)
+        
+        status_msg = f"Loaded episode {session}/{episode} - {len(self.image_files)} frames, {len(self.detections)} detection frames"
+        self.statusBar().showMessage(status_msg)
+        prInfo(status_msg)
+
     
     def get_image_files(self, directory):
         """Get sorted list of image files from directory"""
@@ -800,11 +784,11 @@ class Interact360Visualizer(QMainWindow):
             if True:
                 frame_index = i
                 
-                for detection in detection_entry.get("detections", []):
-                    track_id = detection.get("track_id", -1)
+                for detection in detection_entry["detections"]:
+                    track_id = detection["track_id"]
                     
                     # Extract engagement level if available
-                    engagement_level = detection.get("engagement_level", detection.get("engagement_level_auto", -1))
+                    engagement_level = detection.get("engagement_level", -1)
                     if engagement_level >= 0:  # Valid engagement level
                         if track_id not in self.track_engagement_data:
                             self.track_engagement_data[track_id] = {'frames': [], 'engagement': []}
@@ -813,19 +797,17 @@ class Interact360Visualizer(QMainWindow):
                     
                     # Extract mask size if RLE is available
                     if "mask_rle" in detection:
-                        try:
-                            mask_rle = torch.tensor(detection["mask_rle"], dtype=torch.int32)
-                            # Calculate mask size by decoding RLE and counting pixels
-                            # For efficiency, we can estimate from RLE without full decoding
-                            mask_size = self.estimate_mask_size_from_rle(mask_rle)
-                            
-                            if track_id not in self.track_mask_size_data:
-                                self.track_mask_size_data[track_id] = {'frames': [], 'mask_size': []}
-                            self.track_mask_size_data[track_id]['frames'].append(frame_index)
-                            self.track_mask_size_data[track_id]['mask_size'].append(mask_size)
-                        except Exception as e:
-                            prWarning(f"Failed to extract mask size for track {track_id} at frame {frame_index}: {e}")
-    
+                        mask_rle = [int(x) for x in detection["mask_rle"].split(",")]
+                        mask_rle = torch.tensor(mask_rle, dtype=torch.int32)
+                        # Calculate mask size by decoding RLE and counting pixels
+                        # For efficiency, we can estimate from RLE without full decoding
+                        mask_size = self.estimate_mask_size_from_rle(mask_rle)
+                        
+                        if track_id not in self.track_mask_size_data:
+                            self.track_mask_size_data[track_id] = {'frames': [], 'mask_size': []}
+                        self.track_mask_size_data[track_id]['frames'].append(frame_index)
+                        self.track_mask_size_data[track_id]['mask_size'].append(mask_size)
+
     def estimate_mask_size_from_rle(self, rle_tensor):
         """Estimate mask size from RLE encoding without full decoding"""
         # RLE format: [starts_with_true, run1, run2, run3, ...]
@@ -850,37 +832,31 @@ class Interact360Visualizer(QMainWindow):
             
         if interaction_mask_resized is None:
             return None
-        
-        try:
-            # Decode the mask
-            mask = decode_RLE(mask_rle.to(MASK_RLE_DEVICE), image_shape)
-            mask_np = mask.cpu().numpy().astype(bool)
-            
-            # Find intersection
-            intersection = mask_np & interaction_mask_resized
-            
-            return intersection
-        except Exception as e:
-            prWarning(f"Failed to compute mask intersection: {e}")
-            return None
     
+        # Decode the mask
+        mask = decode_RLE(mask_rle.to(MASK_RLE_DEVICE), image_shape)
+        mask_np = mask.cpu().numpy().astype(bool)
+        
+        # Find intersection
+        intersection = mask_np & interaction_mask_resized
+        
+        return intersection
+
     def get_interaction_mask_for_frame(self, frame_index, image_shape):
         """Get the interaction mask for a specific frame (dynamic or static)"""
         if self.interact_zone_tracking is not None:
             # Use dynamic interaction zone tracking
             if frame_index < len(self.interact_zone_tracking):
-                try:
-                    interact_zone_entry = self.interact_zone_tracking[frame_index]
-                    if "detections" in interact_zone_entry and len(interact_zone_entry["detections"]) > 0:
-                        # Get the first detection as interaction zone mask
-                        interaction_det = interact_zone_entry["detections"][0]
-                        if "mask_rle" in interaction_det:
-                            mask_rle = torch.tensor(interaction_det["mask_rle"], dtype=torch.int32).to(MASK_RLE_DEVICE)
-                            mask = decode_RLE(mask_rle, image_shape)
-                            return mask.cpu().numpy().astype(bool)
-                except Exception as e:
-                    prWarning(f"Failed to load dynamic interaction mask for frame {frame_index}: {e}")
-                    
+                interact_zone_entry = self.interact_zone_tracking[frame_index]
+                if "detections" in interact_zone_entry and len(interact_zone_entry["detections"]) > 0:
+                    # Get the first detection as interaction zone mask
+                    interaction_det = interact_zone_entry["detections"][0]
+                    if "mask_rle" in interaction_det:
+                        mask_rle = [int(x) for x in interaction_det["mask_rle"].split(",")]
+                        mask_rle = torch.tensor(mask_rle, dtype=torch.int32).to(MASK_RLE_DEVICE)
+                        mask = decode_RLE(mask_rle, image_shape)
+                        return mask.cpu().numpy().astype(bool)
+
             # Fallback to static mask if dynamic fails or not available
             return self.get_static_interaction_mask(image_shape)
         else:
@@ -1046,69 +1022,59 @@ class Interact360Visualizer(QMainWindow):
             
             # Draw mask if enabled and available
             if self.show_masks and "mask_rle" in det:
-                try:
-                    # Decode RLE mask
-                    mask_rle = torch.tensor(det["mask_rle"], dtype=torch.int32).to(MASK_RLE_DEVICE)
-                    mask = decode_RLE(mask_rle, (image_height, image_width))
-                    mask_np = mask.cpu().numpy().astype(bool)
-                    
-                    # Apply colored overlay
-                    overlay = image_copy.copy()
-                    overlay[mask_np] = color
-                    alpha = self.mask_opacity / 100.0
-                    image_copy = cv2.addWeighted(image_copy, 1.0-alpha, overlay, alpha, 0)
-                    
-                except Exception as e:
-                    prWarning(f"Failed to decode RLE mask for track {track_id}: {e}")
-            
+                # Decode RLE mask
+                mask_rle = [int(x) for x in det["mask_rle"].split(",")]
+                mask_rle = torch.tensor(mask_rle, dtype=torch.int32).to(MASK_RLE_DEVICE)
+                mask = decode_RLE(mask_rle, (image_height, image_width))
+                mask_np = mask.cpu().numpy().astype(bool)
+                
+                # Apply colored overlay
+                overlay = image_copy.copy()
+                overlay[mask_np] = color
+                alpha = self.mask_opacity / 100.0
+                image_copy = cv2.addWeighted(image_copy, 1.0-alpha, overlay, alpha, 0)
+
             # Draw interaction highlights for engagement level 3 tracks
             if (self.show_interaction_highlights and 
                 engagement_level == 3 and 
                 "mask_rle" in det and 
                 self.interaction_mask is not None):
-                try:
-                    mask_rle = torch.tensor(det["mask_rle"], dtype=torch.int32)
-                    intersection = self.get_mask_intersection_with_interaction_zone(
-                        mask_rle, (image_height, image_width), self.current_frame)
+                mask_rle = [int(x) for x in det["mask_rle"].split(",")]
+                mask_rle = torch.tensor(mask_rle, dtype=torch.int32)
+                intersection = self.get_mask_intersection_with_interaction_zone(
+                    mask_rle, (image_height, image_width), self.current_frame)
+                
+                if intersection is not None and intersection.any():
+                    # Create a bright highlight overlay for interaction areas
+                    highlight_color = (0, 255, 255)  # Bright cyan for interaction zones
+                    overlay = image_copy.copy()
+                    overlay[intersection] = highlight_color
                     
-                    if intersection is not None and intersection.any():
-                        # Create a bright highlight overlay for interaction areas
-                        highlight_color = (0, 255, 255)  # Bright cyan for interaction zones
-                        overlay = image_copy.copy()
-                        overlay[intersection] = highlight_color
-                        
-                        # Apply strong highlight with higher opacity
-                        alpha = 0.7  # 70% opacity for interaction highlights
-                        image_copy = cv2.addWeighted(image_copy, 1.0-alpha, overlay, alpha, 0)
-                        
-                        # Add contour around interaction area
-                        intersection_uint8 = intersection.astype(np.uint8)
-                        contours, _ = cv2.findContours(intersection_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                        if contours:
-                            cv2.drawContours(image_copy, contours, -1, highlight_color, 3)
-                            
-                except Exception as e:
-                    prWarning(f"Failed to draw interaction highlight for track {track_id}: {e}")
-            
+                    # Apply strong highlight with higher opacity
+                    alpha = 0.7  # 70% opacity for interaction highlights
+                    image_copy = cv2.addWeighted(image_copy, 1.0-alpha, overlay, alpha, 0)
+                    
+                    # Add contour around interaction area
+                    intersection_uint8 = intersection.astype(np.uint8)
+                    contours, _ = cv2.findContours(intersection_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    if contours:
+                        cv2.drawContours(image_copy, contours, -1, highlight_color, 3)
+
             # Draw thick contour if this track is selected
             if (self.selected_track is not None and self.selected_track == track_id):
                 if self.show_masks and "mask_rle" in det:
-                    try:
-                        # Use mask contour for selected track
-                        mask_rle = torch.tensor(det["mask_rle"], dtype=torch.int32).to(MASK_RLE_DEVICE)
-                        mask = decode_RLE(mask_rle, (image_height, image_width))
-                        mask_np = mask.cpu().numpy().astype(np.uint8)
-                        
-                        # Find contours
-                        contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                        if contours:
-                            # Draw the largest contour with thick line
-                            largest_contour = max(contours, key=cv2.contourArea)
-                            cv2.drawContours(image_copy, [largest_contour], -1, color, 6)
-                    except:
-                        # Fall back to thick bounding box
-                        x1, y1, x2, y2 = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
-                        cv2.rectangle(image_copy, (x1, y1), (x2, y2), color, 8)
+                    # Use mask contour for selected track
+                    mask_rle = [int(x) for x in det["mask_rle"].split(",")]
+                    mask_rle = torch.tensor(mask_rle, dtype=torch.int32).to(MASK_RLE_DEVICE)
+                    mask = decode_RLE(mask_rle, (image_height, image_width))
+                    mask_np = mask.cpu().numpy().astype(np.uint8)
+                    
+                    # Find contours
+                    contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    if contours:
+                        # Draw the largest contour with thick line
+                        largest_contour = max(contours, key=cv2.contourArea)
+                        cv2.drawContours(image_copy, [largest_contour], -1, color, 6)
                 else:
                     # Fall back to thick bounding box when masks not available
                     x1, y1, x2, y2 = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])

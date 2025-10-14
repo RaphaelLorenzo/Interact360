@@ -200,7 +200,7 @@ def main(args):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video_path", "-v", type=str, default="./demo/data/2025_06_13_11_15_31_Theta360.mkv", help="Video path to extract images from (default: %(default)s)")
+    parser.add_argument("--video_path", "-i", type=str, default="./demo/data/2025_06_13_11_15_31_Theta360.mkv", help="Video path to extract images from (default: %(default)s)")
     parser.add_argument("--save_dir", "-s", type=str, default="./demo/output", help="Save directory for the extracted images (default: %(default)s)")
     parser.add_argument("--framerate", "-f", type=int, default=15, help="Framerate to extract images from (default: %(default)s)")
     parser.add_argument("--workers", "-w", type=int, default=0, help="Number of cores to use for parallel processing. Default: 0 (use half of available cores) (default: %(default)s)") 

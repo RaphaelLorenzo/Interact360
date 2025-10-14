@@ -19,7 +19,7 @@ pip install -r requirements.txt
 
 ## Run
 
-Place your video under `./demo/data` (or use `-v` to change the input video path and `-s` for the ouput saving path, then the appropriate `-d` to run outside of the directory)
+Place your video under `./demo/data` (or use `-i` to change the input video path and `-s` for the ouput saving path, then the appropriate `-d` to run outside of the directory)
 
 From a video run these 3 commands to extract images, detect segment and track people inside, and assess if they are interacting 
 
@@ -40,7 +40,7 @@ Where `-izt 2688,1042,4585,1919` is the bounding box of the interaction zone in 
 
 
 ```
-python ./process/extract_images.py -v ./demo/data/2025_06_13_11_15_31_Theta360.mkv
+python ./process/extract_images.py -i ./demo/data/2025_06_13_11_15_31_Theta360.mkv
 python ./process/detect_segment_and_track.py -d ./demo/output/2025_06_13_11_15_31_Theta360
 python ./process/detect_interactions.py -d ./demo/output/2025_06_13_11_15_31_Theta360
 ```

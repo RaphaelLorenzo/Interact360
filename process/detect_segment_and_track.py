@@ -1229,11 +1229,15 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 # Increment the current SAM2 track id before next tracking
                 current_sam2_track_id += 1
     
+    # reorder based on keys
+    sam2_detections_output = dict(sorted(sam2_detections_output.items()))
+    
     # Transform the dict to a list
     sam2_detections_output_list = []
     for image_idx, image_detections in sam2_detections_output.items():
         for det in image_detections["detections"]:
-            det["mask_rle"] = det["mask_rle"].cpu().numpy().tolist()
+            mask_rle_list = det["mask_rle"].cpu().numpy().tolist()
+            det["mask_rle"] = ",".join([str(int(x)) for x in mask_rle_list])
         sam2_detections_output_list.append(image_detections)
     
     # Filter isolated detections
