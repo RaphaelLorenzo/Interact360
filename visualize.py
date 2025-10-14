@@ -801,7 +801,11 @@ class Interact360Visualizer(QMainWindow):
                         mask_rle = torch.tensor(mask_rle, dtype=torch.int32)
                         # Calculate mask size by decoding RLE and counting pixels
                         # For efficiency, we can estimate from RLE without full decoding
-                        mask_size = self.estimate_mask_size_from_rle(mask_rle)
+                        if "mask_size" in detection:
+                            mask_size = detection["mask_size"]
+                        else:
+                            # fallback for older versions
+                            mask_size = self.estimate_mask_size_from_rle(mask_rle)
                         
                         if track_id not in self.track_mask_size_data:
                             self.track_mask_size_data[track_id] = {'frames': [], 'mask_size': []}

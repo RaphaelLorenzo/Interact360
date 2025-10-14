@@ -1084,6 +1084,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                                                         "xmax": bbox_in_absolute_image[2],
                                                                         "ymax": bbox_in_absolute_image[3],
                                                                         "validity": "valid",
+                                                                        "mask_size": full_image_mask.sum(),
                                                                         "mask_rle": full_image_mask_rle})
                 
                 # ... if it did not match, iterate on all the following images and keep checking if it does not match with any existing detection, otherwise save as new elements of the track ...
@@ -1173,6 +1174,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                                                                         "xmax": bbox_in_absolute_image[2],
                                                                                         "ymax": bbox_in_absolute_image[3],
                                                                                         "validity": "valid",
+                                                                                        "mask_size": full_image_mask.sum(),
                                                                                         "mask_rle": full_image_mask_rle})
 
                     if args.display:
