@@ -8,7 +8,7 @@ import numpy as np
 import cv2
 import socket
 import pickle
-
+from typing import Optional, Union
 from ultralytics import YOLO
 
 here = os.path.dirname(__file__)
@@ -194,14 +194,14 @@ def bb_intersection_over_union(boxA, boxB):
     # return the intersection over union value
     return iou
 
-def get_image_centered_on_detection(image : np.ndarray, detection_box : list, projection_type : str = "horizontal_crop") -> tuple:
+def get_image_centered_on_detection(image : np.ndarray, detection_box : list, projection_type : str = "horizontal_crop", desired_width: Optional[int] = None) -> tuple:
     """ Get the centered image on a detection box.
     
     Args:
         image (np.ndarray): Image to crop as an ndarray, shape is [H, W, 3]
         detection_box (list): List containing the coordinates of the detection box in the format [xmin, ymin, xmax, ymax].
         projection_type (str): Type of projection to use, either "horizontal_crop" or "perspective".
-        
+        desired_width (Optional[int]): Desired width of the centered image. If None, the width of the image is used.
     Returns:
         tuple: Tuple containing the centered image, the centered box, the xmin and xmax of the image in the original image
     """
@@ -215,7 +215,8 @@ def get_image_centered_on_detection(image : np.ndarray, detection_box : list, pr
         xmax = detection_box[2]
         ymax = detection_box[3]
         center_box_x = (xmin + xmax) / 2
-        desired_width = image.shape[1] // 2
+        if desired_width is None:
+            desired_width = image.shape[1] // 2
         
         image_xmin = int(center_box_x) - desired_width // 2 # 3858 (3693) |
         image_xmax = int(center_box_x) + desired_width // 2 # 5778 (5613)
@@ -1053,7 +1054,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         labels_prompt = None
                 else:
                     # when interact zone tracking is used, we do not need all these checks
-                    image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box) # only cropping supported for now
+                    image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box, desired_width=2880) # only cropping supported for now
                     points_prompt = None
                     labels_prompt = None
                     
@@ -1110,7 +1111,8 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     following_image = np.array(following_image)
                     
                     # Center based on the bounding box of the previous detection
-                    following_image_centered, following_box_in_image_centered, following_image_xmin, following_image_xmax = get_image_centered_on_detection(following_image, bbox_in_absolute_image)
+                    desired_width = 2880 if args.interact_zone_tracking != "" else None
+                    following_image_centered, following_box_in_image_centered, following_image_xmin, following_image_xmax = get_image_centered_on_detection(following_image, bbox_in_absolute_image, desired_width=desired_width)
                                         
                     # Find the mask in the following image
                     out_obj_ids, out_mask_logits = video_predictor.track(following_image_centered)
