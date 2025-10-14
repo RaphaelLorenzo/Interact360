@@ -594,8 +594,16 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 
                 batch_list.extend([image_left, image_front, image_right, image_back])
                 
-                if False:
-                    # FOR DEBUGGING
+                if args.display:
+                    
+                    image_show = image.copy()
+                    image_show = cv2.cvtColor(image_show, cv2.COLOR_BGR2RGB)
+                    image_show = cv2.resize(image_show, (image_show.shape[1]//2, image_show.shape[0]//2))
+                    cv2.imshow("full image", image_show)
+                    key = cv2.waitKey(int(1000/15))
+                    if key == ord('q') or key == 27:
+                        exit(0)
+                    
                     # draw the valid zones of each subimage (the center of the image, if a topleft detection 
                     # falls outside of it we will not use it so it will be processed another camera)
                     image_left = image_left.astype(np.float32) / 255.0
@@ -615,32 +623,36 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     image_back[:, image_back.shape[1]//4*3:, :] *= 0.5
                     
                     stacked = np.concatenate([image_left, image_front, image_right, image_back], axis=0)
-                    stacked = cv2.resize(stacked, (stacked.shape[1]//8, stacked.shape[0]//8))
+                    stacked = cv2.resize(stacked, (stacked.shape[1]//4, stacked.shape[0]//4))
                     stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
                     cv2.imshow("stacked", stacked)
                     key = cv2.waitKey(int(1000/15))
                     if key == ord('q') or key == 27:
                         exit(0)
-                    batch_list.append(stacked)
+                    # batch_list.append(stacked)
                 
             # Run YOLO detection on the batch
             batch_detections = detection_model(batch_list, verbose=False, device = video_predictor.device) # results of len args.yolo_batch_size * 4
             
             # Rearrange the outputs by original images
             batch_detections = [batch_detections[i:i+4] for i in range(0, len(batch_detections), 4)] # list of list
+            batch_list_rearranged = [batch_list[i:i+4] for i in range(0, len(batch_list), 4)] # list of list
             
-            # Process each original image
+            # Iterate over original images
             for batch_image_idx, subimages_detections in enumerate(batch_detections):
 
                 original_image = original_images_list[batch_image_idx].copy()
                 original_image_width = original_image.shape[1]
                 subimage_width = original_image_width // 2
+                
+                subimages = batch_list_rearranged[batch_image_idx] # list of 4 subimages
+                subimages = [subimage.astype(np.float32) / 255.0 for subimage in subimages]
 
                 # YOLO detection element to be appended to the output
                 current_image_detections = {"image_file": os.path.basename(image_files_batch[batch_image_idx]), "detections": []}
                 
                 # Iterate over subimages
-                for position, result in zip(image_decomposition_positions, subimages_detections):
+                for position, result, subimage in zip(image_decomposition_positions, subimages_detections, subimages):
                     
                     # print(result.names) # dict with {id: NAME, id: NAME, ...}
                     # print(result.boxes.cls) # tensor of class ids
@@ -655,6 +667,11 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     confidences = result.boxes.conf
                     classes_names =  [result.names[int(class_id.cpu().numpy())] for class_id in class_ids]
                     
+                    if args.display:
+                        subimage[:, :int(subimage_width//4), :] *= 0.5
+                        subimage[:, 3 * int(subimage_width//4):, :] *= 0.5
+                        
+                    # Iterate over detections
                     for box_idx, (box, class_name, confidence) in enumerate(zip(boxes, classes_names, confidences)):
                         if class_name != "person":
                             continue
@@ -666,6 +683,17 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         ymin = box[1].item()
                         xmax = box[2].item()
                         ymax = box[3].item()
+                        
+                        if args.display:
+                            color = (0, 255, 0)
+                            if (xmin < subimage_width//4 or xmin > 3 * (subimage_width//4)):
+                                color = (255, 255, 0)
+                            if confidence.item() < args.yolo_confidence_threshold:
+                                color = (255, 0, 0)
+                            cv2.rectangle(subimage, (int(xmin), int(ymin)), (int(xmax), int(ymax)), color, 8)
+                            cv2.putText(subimage, class_name, (int(xmin), int(ymin)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                            cv2.circle(subimage, (int(xmin), int(ymin)), 16, color, -1)
+                        
                         if xmin < subimage_width//4 or xmin > 3 * (subimage_width//4):
                             # do not consider "edge detections" they will be processed in another camera
                             continue
@@ -694,25 +722,39 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                                                         "confidence": confidence.item(),
                                                                         "validity": "valid" if confidence.item() > args.yolo_confidence_threshold else "low_conf"})
                 
+                if args.display:
+                    stacked = np.concatenate([subimage for subimage in subimages], axis=0)
+                    stacked = cv2.resize(stacked, (stacked.shape[1]//4, stacked.shape[0]//4))
+                    stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
+                    cv2.imshow("stacked with detections", stacked)
+                    key = cv2.waitKey(int(1000/15))
+                    if key == ord('q') or key == 27:
+                        exit(0)
+                    # batch_list.append(stacked)
+                    
                 # Append the detection element to the output of YOLO detections
                 yolo_detections_output.append(current_image_detections)
 
-                if False:
+                if args.display:
                     # FOR DEBUGGING
                     # draw box
                     original_image_show = original_image.copy()
+                    
                     for detection in current_image_detections["detections"]:
-                        cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), (0, 0, 255), 2)
-                        cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                        color = (0, 255, 0)
+                        if detection["confidence"] < args.yolo_confidence_threshold:
+                            color = (255, 0, 0)
+                        cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color, 2)
+                        cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                 
                     img_show = original_image_show.copy()
                     img_show = cv2.resize(img_show, (1920, 960))
                     img_show = cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB)
-                    cv2.imshow("image_result", img_show)
+                    cv2.imshow("full image with detections", img_show)
                     key = cv2.waitKey(0)
                     if key == ord('q') or key == 27:
                         exit(0)
-                    cv2.destroyAllWindows()
+                    # cv2.destroyAllWindows()
     
     if args.interact_zone_tracking != "":
         filtered_yolo_detections_output = yolo_detections_output
