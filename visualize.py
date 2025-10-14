@@ -716,6 +716,7 @@ class Interact360Visualizer(QMainWindow):
             detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
             if os.path.exists(detection_file):
                 detections_list = read_json_to_dic(detection_file)
+                detections_list = self.reorder_detections_list(detections_list)
                 self.detections = self.convert_detections_list_to_dict(detections_list)
                 self.extract_plot_data(detections_list)
                 prInfo(f"Loaded {len(detections_list)} detections, {len(self.detections)} detection frames")
@@ -763,16 +764,29 @@ class Interact360Visualizer(QMainWindow):
         
         return sorted(files)
     
+    def reorder_detections_list(self, detections_list):
+        """Reorder detections list based on the image_file basenames, it should be done but sometimes it's not"""
+        # reorder based on the image_file basenames
+        detections_list_basenames = [os.path.basename(detection_entry["image_file"]) for detection_entry in detections_list]
+        detections_list_basenames_argsort = np.argsort(detections_list_basenames)
+        return [detections_list[i] for i in detections_list_basenames_argsort]
+    
     def convert_detections_list_to_dict(self, detections_list):
         """Convert detections list format to indexed dictionary format"""
         detections_dict = {}
         
         assert(len(detections_list) == len(self.image_files)), "Number of detections and images should be the same"
         
-        for i, detection_entry in enumerate(detections_list):
+        for i, (detection_entry, image_file) in enumerate(zip(detections_list, self.image_files)):
+            det_image_file = detection_entry["image_file"]
+            
+            # if os.path.basename(image_file) != os.path.basename(det_image_file):
+            #     print(f"[{i}] Image file: {os.path.basename(image_file)} vs detection: {os.path.basename(det_image_file)}")
+            assert(os.path.basename(image_file) == os.path.basename(det_image_file)), f"Image file: {os.path.basename(image_file)} vs detection: {os.path.basename(det_image_file)}"
+            
             detections_dict[i] = {
-                "image_file": detection_entry.get("image_file", ""),
-                "detections": detection_entry.get("detections", [])
+                "image_file": detection_entry["image_file"],
+                "detections": detection_entry["detections"]
             }
         
         return detections_dict
@@ -936,7 +950,8 @@ class Interact360Visualizer(QMainWindow):
             return
         
         image_file = self.image_files[self.current_frame]
-        detections = self.detections.get(self.current_frame, {}).get("detections", [])
+        # image_file_from_dict = self.detections[self.current_frame]["image_file"]
+        detections = self.detections[self.current_frame]["detections"]
         
         # Load image
         tic = time.time()
@@ -1108,7 +1123,7 @@ class Interact360Visualizer(QMainWindow):
         if self.current_frame not in self.detections:
             return
         
-        detections = self.detections[self.current_frame].get("detections", [])
+        detections = self.detections[self.current_frame]["detections"]
         
         for det in detections:
             track_id = det.get("track_id", -1)
