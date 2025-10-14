@@ -1104,7 +1104,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 
                 # ... if it did not match, iterate on all the following images and keep checking if it does not match with any existing detection, otherwise save as new elements of the track ...
                 break_count = 0
-                for following_image_idx in range(image_idx+1, len(images_list)):
+                for following_image_idx in tqdm(range(image_idx+1, len(images_list)), desc="[{}] Tracking with SAM2".format(current_sam2_track_id)):
                     following_image_file = images_list[following_image_idx]
                     following_image = Image.open(following_image_file)
                     following_image = np.array(following_image)

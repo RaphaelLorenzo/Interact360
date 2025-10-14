@@ -931,7 +931,7 @@ class Interact360Visualizer(QMainWindow):
         
         image_file = self.image_files[self.current_frame]
         # image_file_from_dict = self.detections[self.current_frame]["image_file"]
-        detections = self.detections[self.current_frame]["detections"]
+        detections = self.detections[self.current_frame]["detections"] if self.current_frame in self.detections else []
         
         # Load image
         tic = time.time()
