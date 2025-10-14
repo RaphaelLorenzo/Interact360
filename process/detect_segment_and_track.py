@@ -742,16 +742,15 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     
                     for detection in current_image_detections["detections"]:
                         color = (0, 255, 0)
-                        if detection["confidence"] < args.yolo_confidence_threshold:
-                            color = (255, 0, 0)
-                        cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color, 2)
-                        cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                
+                        if detection["confidence"] >= args.yolo_confidence_threshold:
+                            cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color, 2)
+                            cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    
                     img_show = original_image_show.copy()
-                    img_show = cv2.resize(img_show, (1920, 960))
+                    img_show = cv2.resize(img_show, (img_show.shape[1]//2, img_show.shape[0]//2))
                     img_show = cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB)
                     cv2.imshow("full image with detections", img_show)
-                    key = cv2.waitKey(0)
+                    key = cv2.waitKey(int(1000/15))
                     if key == ord('q') or key == 27:
                         exit(0)
                     # cv2.destroyAllWindows()
