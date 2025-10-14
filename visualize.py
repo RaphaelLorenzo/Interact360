@@ -371,18 +371,32 @@ class Interact360Visualizer(QMainWindow):
             prError(f"Output directory does not exist: {self.args.directory}")
             return episodes_list
         
-        # Look for subdirectories that contain episodes
-        for item in os.listdir(self.args.directory):
-            item_path = os.path.join(self.args.directory, item)
-            if os.path.isdir(item_path):
-                episodes_dir = os.path.join(item_path, "episodes")
-                if os.path.exists(episodes_dir):
-                    # Find episode subdirectories (like 0000)
-                    for ep in os.listdir(episodes_dir):
-                        ep_path = os.path.join(episodes_dir, ep)
-                        if os.path.isdir(ep_path) and ep.isdigit():
-                            episodes_list.append((item, ep))
+    
+        if self.args.recording_name != "" and not os.path.exists(os.path.join(self.args.directory, self.args.recording_name)):
+            prError(f"Recording name does not exist: {self.args.recording_name} in directory {self.args.directory}")
+            return episodes_list
         
+        if self.args.recording_name == "":
+            # Look for subdirectories that contain episodes
+            for item in os.listdir(self.args.directory):
+                item_path = os.path.join(self.args.directory, item)
+                if os.path.isdir(item_path):
+                    episodes_dir = os.path.join(item_path, "episodes")
+                    if os.path.exists(episodes_dir):
+                        # Find episode subdirectories (like 0000)
+                        for ep in os.listdir(episodes_dir):
+                            ep_path = os.path.join(episodes_dir, ep)
+                            if os.path.isdir(ep_path) and ep.isdigit():
+                                episodes_list.append((item, ep))
+        else:
+            episodes_dir = os.path.join(self.args.directory, self.args.recording_name, "episodes")
+            if os.path.exists(episodes_dir):
+                # Find episode subdirectories (like 0000)
+                for ep in os.listdir(episodes_dir):
+                    ep_path = os.path.join(episodes_dir, ep)
+                    if os.path.isdir(ep_path) and ep.isdigit():
+                        episodes_list.append((self.args.recording_name, ep))
+                        
         episodes_list.sort()
         prInfo(f"Found {len(episodes_list)} episodes: {episodes_list}")
         return episodes_list
@@ -1239,6 +1253,8 @@ def main():
     parser = argparse.ArgumentParser(description="Interact360 Visualizer")
     parser.add_argument("--directory", "-d", type=str, default="./demo/output/",
                        help="Output directory containing processed data (e.g., demo/output)")
+    parser.add_argument("--recording_name", "-rn", type=str, default="",
+                       help="Recording name to visualize, if not provided will visualize all recordings in the directory")
     
     args = parser.parse_args()
     
