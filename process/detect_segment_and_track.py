@@ -1118,7 +1118,8 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     tic = time.time()
                     out_obj_ids, out_mask_logits = video_predictor.track(following_image_centered)
                     tac = time.time()
-                    prTimer(f"Track with SAM2", tic, tac)
+                    if args.verbose or args.display:
+                        prTimer(f"Track with SAM2", tic, tac)
                     centered_image_mask = (out_mask_logits[0, 0, :, :] > 0.0)
                     centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=ERODE_AND_DILATE_N_PIXELS)
                     if args.interact_zone_tracking != "":
@@ -1292,6 +1293,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_keypoints_prompt", "-ukp", action="store_true", default=False, help="Use the keypoints prompt (default: %(default)s)")
     parser.add_argument("--vos_optimized", "-vos", action="store_true", default=False, help="Use the VOS optimized model (default: %(default)s)")
     parser.add_argument("--display", "-disp", action="store_true", default=False, help="Display the detections live (default: %(default)s)")
+    parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Verbose mode (default: %(default)s)")
     parser.add_argument("--interact_zone_tracking", "-izt", type=str, default="", help="Don't track the people but the zone to interact with, give a prompt at the beggining ([xmin, ymin, xmax, ymax] in pixels) and track from there (default: %(default)s)")
     # parser.add_argument("--ngpu", "-ngpu", type=int, default=0, help="Number of GPUs to use, default 0 means use all GPUs")
     args = parser.parse_args()
