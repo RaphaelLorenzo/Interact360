@@ -1084,7 +1084,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                                                         "xmax": bbox_in_absolute_image[2],
                                                                         "ymax": bbox_in_absolute_image[3],
                                                                         "validity": "valid",
-                                                                        "mask_size": full_image_mask.sum(),
+                                                                        "mask_size": full_image_mask.sum().item(),
                                                                         "mask_rle": full_image_mask_rle})
                 
                 # ... if it did not match, iterate on all the following images and keep checking if it does not match with any existing detection, otherwise save as new elements of the track ...
@@ -1174,7 +1174,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                                                                         "xmax": bbox_in_absolute_image[2],
                                                                                         "ymax": bbox_in_absolute_image[3],
                                                                                         "validity": "valid",
-                                                                                        "mask_size": full_image_mask.sum(),
+                                                                                        "mask_size": full_image_mask.sum().item(),
                                                                                         "mask_rle": full_image_mask_rle})
 
                     if args.display:
@@ -1233,7 +1233,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     
     # reorder based on keys
     sam2_detections_output = dict(sorted(sam2_detections_output.items()))
-    
+        
     # Transform the dict to a list
     sam2_detections_output_list = []
     for image_idx, image_detections in sam2_detections_output.items():
@@ -1244,7 +1244,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     
     # Filter isolated detections
     sam2_detections_output_list = filter_isolated_detections(sam2_detections_output_list)
-    
+        
     # Write the detections to a JSON file
     if args.interact_zone_tracking != "":
         write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "interact_zone_tracking_360.json"))
