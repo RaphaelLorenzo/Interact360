@@ -62,12 +62,12 @@ def main(args, episode: str):
 
     for image_idx, image_detections in tqdm(enumerate(detections_dict), total=len(detections_dict), desc="Processing detections"):
         for det_idx, det in enumerate(image_detections["detections"]):
-            mask_rle = np.array(det["mask_rle"]).astype(np.int32)
+            mask_rle = np.array(det["mask_rle"].split(",")).astype(np.int32)
             mask = decode_RLE(torch.from_numpy(mask_rle), shape = (height, width))
             if intersection_mask is not None:
                 intersection_sum = torch.sum(intersection_mask & mask)
             else:
-                compared_mask_rle = np.array(interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"]).astype(np.int32)
+                compared_mask_rle = np.array(interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"].split(",")).astype(np.int32)
                 compared_mask = decode_RLE(torch.from_numpy(compared_mask_rle), shape = (height, width))
                 intersection_sum = torch.sum(compared_mask & mask)
                 
