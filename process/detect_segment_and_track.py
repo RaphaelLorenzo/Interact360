@@ -475,7 +475,9 @@ def filter_isolated_detections(detections, window_size = 5, min_element_in_windo
         min_element_in_window (int, optional): Minimum number of elements in the window to consider the track not isolated. Defaults to 3.
 
     Returns:
-        _type_: _description_
+        tuple: Tuple of (detections, filtered_infos)
+            detections (list): List of detections with the isolated detections removed
+            filtered_infos (dict): Dictionary of track_id -> {"min_idx": ..., "max_idx": ..., "remove_for_track": ...}
     """
     track_ids_appearances = {}
     for image_idx, image_det in tqdm(enumerate(detections), total=len(detections)):
@@ -488,6 +490,7 @@ def filter_isolated_detections(detections, window_size = 5, min_element_in_windo
     # print(track_ids_appearances.keys())
     
     remove_track_ids_at_image_idxs = []
+    filtered_infos = {}
     for track_id, appearances in track_ids_appearances.items():
         
         min_idx = np.min(np.where(appearances)[0])
@@ -500,8 +503,9 @@ def filter_isolated_detections(detections, window_size = 5, min_element_in_windo
             if np.sum(window) < min_element_in_window:
                 remove_track_ids_at_image_idxs.append({"track_id": track_id, "image_idx": k})
                 remove_for_track.append(k)
-                
-        prInfo(f"Track {track_id} (min : {min_idx}, max : {max_idx}) -> removed isolated {remove_for_track}")
+        
+        filtered_infos[track_id] = {"min_idx": min_idx, "max_idx": max_idx, "remove_for_track": remove_for_track}
+        # prInfo(f"Track {track_id} (min : {min_idx}, max : {max_idx}) -> removed isolated {remove_for_track}")
                     
     for remove_dict in remove_track_ids_at_image_idxs:
         track_to_remove = remove_dict["track_id"]
@@ -520,10 +524,10 @@ def filter_isolated_detections(detections, window_size = 5, min_element_in_windo
         # print(f"Removing {track_to_remove} at {index_to_remove}")
         # detections[index_to_remove]["detections"] = [det for det in detections[index_to_remove]["detections"] if det["track_id"] != track_to_remove]
 
-    return detections
+    return detections, filtered_infos
 
 
-UPDATED_INTERACT_ZONE_PROMPT = None
+UPDATED_INTERACT_ZONE_PROMPT = None # global variable to store the updated interact zone prompt for the next episode
 
 def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImagePredictor, vitpose_image_processor: AutoProcessor, vitpose_model: VitPoseForPoseEstimation, episode: str, interact_zone_prompt: list = None):
 
@@ -537,7 +541,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     # images_list = images_list[300:550]
     
     assert(len(images_list) > 0), "No images found in the images path : {}".format(images_path)
-    prInfo("Found {} images".format(len(images_list)))
+    prInfo(f"[{episode}] Found {len(images_list)} images in {images_path}")
     
     # Load detection model from ultralytics
     detection_model = YOLO(f"yolo11{args.yolo_model_size}.pt") #, device = video_predictor.device)  # model for segmantion and detection
@@ -775,7 +779,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
             
             # skip image if no detections
             if len(yolo_detections_in_image) == 0:
-                prWarning("No detections in image : {}, skipping".format(image_file))
+                prWarning(f"[{episode}] No detections in image : {image_file}, skipping")
                 filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
                 continue
 
@@ -842,7 +846,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
 
             # skip image if not valid detections
             if len(valid_detections_images_centered_for_current_image) == 0:
-                prWarning("No valid detections in image : {}, skipping".format(image_file))
+                prWarning(f"[{episode}] No valid detections in image : {image_file}, skipping")
                 filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
                 continue
                     
@@ -1073,7 +1077,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         # prWarning(f"[{image_idx}][YOLO detection {yolo_detection_idx}] Matching SAM2 track {matching_sam2_track} (index {matching_sam2_track_detection_idx}) found. Do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
                         continue
                     else:
-                        prSuccess(f"[{image_idx}][YOLO detection {yolo_detection_idx}] No matching SAM2 track found. Pursuing tracking from this detection starting at image {image_idx}. Assigned SAM2 track ID {current_sam2_track_id}")
+                        prSuccess(f"[{episode}][{image_idx}][YOLO detection {yolo_detection_idx}] No matching SAM2 track found. Pursuing tracking from this detection starting at image {image_idx}. Assigned SAM2 track ID {current_sam2_track_id}")
                         
                     #### Start tracking from the initial frame ####
                     image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box) # only cropping supported for now
@@ -1101,7 +1105,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     
                 # If the video predictor is initialized, reset it before starting a new track
                 if video_predictor_initialized:
-                    prInfo("Resetting video predictor")
+                    prInfo(f"[{episode}] Resetting video predictor")
                     video_predictor.reset_state()
                 
                 # Start like a new tracking with SAM2
@@ -1122,7 +1126,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 
                 mask_area_prop = centered_image_mask.sum() / (image_centered.shape[0] * image_centered.shape[1])
                 if mask_area_prop < MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE:
-                    prWarning(f"[{image_idx}][YOLO detection {yolo_detection_idx}] Mask area is too small ({mask_area_prop * 100:.2f}%). Skipping.")
+                    prWarning(f"[{episode}][{image_idx}][YOLO detection {yolo_detection_idx}] Mask area is too small ({mask_area_prop * 100:.2f}%). Skipping.")
                     continue
                 
                 bbox_in_centered_image = get_bounding_box_torch(centered_image_mask)
@@ -1182,7 +1186,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         break_count += 1
                         if break_count > MAX_OCCLUSION_FRAMES_COUNT:
                             break_count = 0
-                            prWarning(f"Empty mask or too small (bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%) for SAM2 track id {current_sam2_track_id} at image {following_image_idx}, stop the track")
+                            prWarning(f"[{episode}] Empty mask or too small (bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%) for SAM2 track id {current_sam2_track_id} at image {following_image_idx}, stop the track")
                             break
                         else:
                             if bbox_in_centered_image[0] is None:
@@ -1226,7 +1230,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     
                     # If it matches with an existing SAM2 track, break
                     if matching_sam2_track is not None:
-                        prWarning(f"Matching SAM2 track {matching_sam2_track} (idx {matching_sam2_track_detection_idx}) found while tracking with SAM2 track id {current_sam2_track_id} at image {following_image_idx}, do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
+                        prWarning(f"[{episode}] Matching SAM2 track {matching_sam2_track} (idx {matching_sam2_track_detection_idx}) found while tracking with SAM2 track id {current_sam2_track_id} at image {following_image_idx}, do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
                         break
          
                     # Save the detection for the current sam2 track
@@ -1305,7 +1309,11 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         sam2_detections_output_list.append(image_detections)
     
     # Filter isolated detections
-    sam2_detections_output_list = filter_isolated_detections(sam2_detections_output_list)
+    sam2_detections_output_list, filtered_infos = filter_isolated_detections(sam2_detections_output_list)
+    
+    total_tracks = len(filtered_infos)
+    total_tracks_with_filtering = len([track_id for track_id, info in filtered_infos.items() if len(info["remove_for_track"]) > 0])
+    prSuccess(f"[{episode}] Filtered isolated detections in {total_tracks_with_filtering} / {total_tracks} tracks")
 
     assert(len(sam2_detections_output_list) == len(images_list)), "Number of detections and images should be the same"
         
@@ -1315,7 +1323,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         last_detection_element = sam2_detections_output_list[-1]["detections"]
         assert(len(last_detection_element) == 1), f"There should be one and only one detection element (got {len(last_detection_element)})"
         new_interact_zone_prompt = [last_detection_element[0]["xmin"], last_detection_element[0]["ymin"], last_detection_element[0]["xmax"], last_detection_element[0]["ymax"]]
-        prInfo(f"Updating interact zone prompt for the next episode from {interact_zone_prompt} to {new_interact_zone_prompt}")
+        prInfo(f"[{episode}] Updating interact zone prompt for the next episode from {interact_zone_prompt} to {new_interact_zone_prompt}")
         UPDATED_INTERACT_ZONE_PROMPT = new_interact_zone_prompt
     else:
         write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json"))
@@ -1341,8 +1349,8 @@ if __name__ == "__main__":
 
     # assert(args.erode_masks % 2 == 1), "Erode masks must be odd"
     
-    prInfo("Using SAM2 model : {}".format(args.sam2_model))
-    prInfo("Using YOLO model size : {}".format(args.yolo_model_size))
+    prInfo(f"Using SAM2 model : {args.sam2_model}")
+    prInfo(f"Using YOLO model size : {args.yolo_model_size}")
     
     sam2_checkpoint = SAM2_MODEL_TO_CHECKPOINT[args.sam2_model]
     sam2_cfg = SAM2_MODEL_TO_CFG[args.sam2_model]
@@ -1378,13 +1386,17 @@ if __name__ == "__main__":
         interact_zone_prompt = args.interact_zone_tracking.split(",")
         assert len(interact_zone_prompt) == 4, "Interact zone prompt should be 4 values separated by commas"
         interact_zone_prompt = [int(x) for x in interact_zone_prompt]
-        prInfo(f"Using interact zone prompt : {interact_zone_prompt} for the first image")
+        prInfo(f"Using interact zone prompt : {interact_zone_prompt} for the first image in episode {episode}")
     else:
         interact_zone_prompt = None
     
     for episode in episodes_list:
+        prInfo(f"[{episode}] Processing...")
+        tic = time.time()
         main(args, video_predictor, image_predictor, vitpose_image_processor, vitpose_model, episode, interact_zone_prompt)
-
+        tac = time.time()
+        prTimer(f"[{episode}] Processed (detect, segment and track)", tic, tac)
+        
         if args.interact_zone_tracking != "":
-            prInfo(f"Updated interact zone prompt for the next episode from {interact_zone_prompt} to {UPDATED_INTERACT_ZONE_PROMPT}")
+            prInfo(f"[{episode}] Updated interact zone prompt for the next episode from {interact_zone_prompt} to {UPDATED_INTERACT_ZONE_PROMPT}")
             interact_zone_prompt = UPDATED_INTERACT_ZONE_PROMPT
