@@ -276,9 +276,6 @@ if __name__ == "__main__":
     image_processor = AutoProcessor.from_pretrained("usyd-community/vitpose-base-simple")
     prInfo("Loaded image processor")
     
-    # # use torch multiprocessing to process the episodes in parallel
-    # with Pool(processes=num_workers) as pool:
-    #     pool.starmap(process_episode_worker, [(args, ep, image_processor) for ep in episodes_list])
-    
-    for ep in episodes_list:
-        process_episode_worker(args, ep, image_processor)
+    # use torch multiprocessing to process the episodes in parallel
+    with Pool(processes=num_workers) as pool:
+        pool.starmap(process_episode_worker, [(args, ep, image_processor) for ep in episodes_list])
