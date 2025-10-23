@@ -27,8 +27,9 @@ From a video run these 3 commands to extract images, detect segment and track pe
 
 <summary>Mask for interaction</summary>
 
-By default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs if you have a fixed interaction zone. If you have a moving interaction zone (like in SSUP) you can first track the interaction zone with :
+**Fixed interaction zone** : By default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs if you have a fixed interaction zone. 
 
+**Moving interaction zone** : If you have a moving interaction zone (like in SSUP) you can first track the interaction zone by passing its bouding box in the first image of your sequence as `-izt xmin,ymin,xmax,ymax`, note that `xmax` can be `> width` this is the way to track an object that appears on both sides of the equirectangular image. This will create a file `interact_zone_tracking_360.json` in each episode, that will be used by default by `detect_interaction.py`.
 ```
 python detect_segment_and_track.py -d ./demo/output/SSUP_SAMPLE_0/ -izt 2688,1042,4585,1919
 ```
@@ -40,8 +41,8 @@ Where `-izt 2688,1042,4585,1919` is the bounding box of the interaction zone in 
 
 
 ```
-python ./process/extract_images.py -i ./demo/data/2025_06_13_11_15_31_Theta360.mkv
-python ./process/detect_segment_and_track.py -d ./demo/output/2025_06_13_11_15_31_Theta360
+python ./process/extract_images.py -i ./demo/data/2025_06_13_11_15_31_Theta360.mkv -em time -met 300
+python ./process/detect_segment_and_track.py -d ./demo/output/2025_06_13_11_15_31_Theta360 -sm large -ybs 32 -sibs 16
 python ./process/detect_interactions.py -d ./demo/output/2025_06_13_11_15_31_Theta360
 ```
 
