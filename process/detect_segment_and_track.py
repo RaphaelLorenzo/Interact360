@@ -1345,10 +1345,7 @@ if __name__ == "__main__":
     parser.add_argument("--display", "-disp", action="store_true", default=False, help="Display the detections live (default: %(default)s)")
     parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Verbose mode (default: %(default)s)")
     parser.add_argument("--interact_zone_tracking", "-izt", type=str, default="", help="Don't track the people but the zone to interact with, give a prompt at the beggining ([xmin, ymin, xmax, ymax] in pixels) and track from there (default: %(default)s)")
-    # parser.add_argument("--ngpu", "-ngpu", type=int, default=0, help="Number of GPUs to use, default 0 means use all GPUs")
     args = parser.parse_args()
-
-    # assert(args.erode_masks % 2 == 1), "Erode masks must be odd"
     
     prInfo(f"Using SAM2 model : {args.sam2_model}")
     prInfo(f"Using YOLO model size : {args.yolo_model_size}")

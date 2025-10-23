@@ -52,7 +52,7 @@ def process_episode(args, ep, image_processor, model, device):
     
     for image_idx in tqdm(range(len(detections_dict)), total=len(detections_dict), desc="Extracting poses"):
         
-        image_file = detections_dict[image_idx]["image_file"] # basename of the image
+        image_file = os.path.basename(detections_dict[image_idx]["image_file"]) # basename of the image
         image_path = os.path.join(args.dir, "episodes", ep, "images_360", image_file)
         assert os.path.exists(image_path), f"Image path {image_path} does not exist"
         image = Image.open(image_path)
