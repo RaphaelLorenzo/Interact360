@@ -3,6 +3,9 @@
 # Default to mini if no arguments provided
 CHECKPOINTS="mini"
 
+# Set current dir
+CURRENT_DIR=$(pwd)
+
 # Parse command line arguments
 while getopts "c:" opt; do
     case $opt in
@@ -164,7 +167,7 @@ if [ "$SAPIENS_NEEDED" = true ]; then
         fi
     fi
     
-    cd ../../../
+    cd $CURRENT_DIR
 fi
 
 # Check if any Sapiens bfloat16 checkpoints need to be downloaded
