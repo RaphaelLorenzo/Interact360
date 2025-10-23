@@ -192,7 +192,8 @@ def process_episode(args, ep, image_processor, model, device):
                 image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(np.array(image), [det["xmin"], det["ymin"], det["xmax"], det["ymax"]])
                 images_centered_on_valid_detections.append(image_centered)
                 images_xmins_centered_on_valid_detections.append(centered_image_xmin)
-                person_boxes.append([np.array(box_in_image_centered)]) # list of list such that it is interepreted as a batch of one box
+                box_in_image_centered_coco = [box_in_image_centered[0], box_in_image_centered[1], box_in_image_centered[2] - box_in_image_centered[0], box_in_image_centered[3] - box_in_image_centered[1]]
+                person_boxes.append([np.array(box_in_image_centered_coco)]) # list of list such that it is interepreted as a batch of one box
                 
             else:
                 invalid_boxes_idxs.append(idx)

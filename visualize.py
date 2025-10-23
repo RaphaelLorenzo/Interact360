@@ -1143,7 +1143,7 @@ class Interact360Visualizer(QMainWindow):
                             if i < len(scores_vitpose) and scores_vitpose[i] > self.vitpose_min_score:
                                 kp_x, kp_y = int(keypoints[i, 0]), int(keypoints[i, 1])
                                 if kp_x > 0 and kp_y > 0:
-                                    cv2.circle(image_copy, (kp_x, kp_y), 3, pose_color, -1)
+                                    cv2.circle(image_copy, (kp_x, kp_y), 10, pose_color, -1)
                         
                         # Draw skeleton connections
                         for edge in COCO_EDGES:
@@ -1151,6 +1151,9 @@ class Interact360Visualizer(QMainWindow):
                                 scores_vitpose[edge[0]] > self.vitpose_min_score and scores_vitpose[edge[1]] > self.vitpose_min_score):
                                 pt1 = (int(keypoints[edge[0], 0]), int(keypoints[edge[0], 1]))
                                 pt2 = (int(keypoints[edge[1], 0]), int(keypoints[edge[1], 1]))
+                                # put a maximum distance to avoid cross image points
+                                if abs(pt1[0] - pt2[0]) > image_width // 4:
+                                    continue
                                 if pt1[0] > 0 and pt1[1] > 0 and pt2[0] > 0 and pt2[1] > 0:
                                     cv2.line(image_copy, pt1, pt2, pose_color, 2)
             
@@ -1187,6 +1190,8 @@ class Interact360Visualizer(QMainWindow):
                                 edge_color = edge["color"]
                                 kp_x1, kp_y1 = int(sapiens_keypoints[edge["link"][0], 0]), int(sapiens_keypoints[edge["link"][0], 1])
                                 kp_x2, kp_y2 = int(sapiens_keypoints[edge["link"][1], 0]), int(sapiens_keypoints[edge["link"][1], 1])
+                                if abs(kp_x1 - kp_x2) > image_width // 4:
+                                    continue
                                 if kp_x1 > 0 and kp_y1 > 0 and kp_x2 > 0 and kp_y2 > 0:
                                     cv2.line(image_copy, (kp_x1, kp_y1), (kp_x2, kp_y2), edge_color, 2)
         
