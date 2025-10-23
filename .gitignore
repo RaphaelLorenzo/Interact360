@@ -9,3 +9,5 @@ checkpoints/.locks
 checkpoints/models--usyd-community--vitpose-base-simple
 test_masks.py
 PIPELINES.md
+deprecated
+checkpoints/sapiens/*

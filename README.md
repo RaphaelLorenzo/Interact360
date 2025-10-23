@@ -54,3 +54,5 @@ python visualize.py -d ./demo/output
 ## Acknoledgment 
 SAM2
 SAM2 Real Time : https://github.com/Gy920/segment-anything-2-real-time
+ViTPose
+Sapiens

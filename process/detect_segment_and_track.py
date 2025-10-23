@@ -763,7 +763,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         filtered_yolo_detections_output = yolo_detections_output
     else:
         filtered_yolo_detections_output = []
-        for image_idx, image_file in tqdm(enumerate(images_list), desc="Processing input images (image segmentation and first filtering)"):
+        for image_idx, image_file in tqdm(enumerate(images_list), total = len(images_list), desc="Processing input images (image segmentation and first filtering)"):
             
             
             # if os.path.exists("filtered_yolo_detections_output.pkl"):
@@ -1032,7 +1032,8 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         
         # Iterate over all images...
-        for image_idx, image_file in tqdm(enumerate(images_list), desc="Processing input images (tracking with SAM2)"):            
+        prInfo(f"Processing {len(images_list)} input images (tracking with SAM2)...")
+        for image_idx, image_file in enumerate(images_list): #, total=len(images_list), desc="Processing input images (tracking with SAM2)"):            
             yolo_detections_in_image = filtered_yolo_detections_output[image_idx]["detections"]
             if len(yolo_detections_in_image) == 0:
                 # before skipping, create the entry in the sam2_detections_output if it does not exist
@@ -1077,7 +1078,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         # prWarning(f"[{image_idx}][YOLO detection {yolo_detection_idx}] Matching SAM2 track {matching_sam2_track} (index {matching_sam2_track_detection_idx}) found. Do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
                         continue
                     else:
-                        prSuccess(f"[{episode}][{image_idx}][YOLO detection {yolo_detection_idx}] No matching SAM2 track found. Pursuing tracking from this detection starting at image {image_idx}. Assigned SAM2 track ID {current_sam2_track_id}")
+                        prSuccess(f"[{episode}][{image_idx}/{len(images_list)}][YOLO detection {yolo_detection_idx}] No matching SAM2 track found. Pursuing tracking from this detection starting at image {image_idx}. Assigned SAM2 track ID {current_sam2_track_id}")
                         
                     #### Start tracking from the initial frame ####
                     image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box) # only cropping supported for now
@@ -1105,7 +1106,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     
                 # If the video predictor is initialized, reset it before starting a new track
                 if video_predictor_initialized:
-                    prInfo(f"[{episode}] Resetting video predictor")
+                    prInfo(f"[{episode}][{image_idx}/{len(images_list)}] Resetting video predictor")
                     video_predictor.reset_state()
                 
                 # Start like a new tracking with SAM2
@@ -1126,7 +1127,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 
                 mask_area_prop = centered_image_mask.sum() / (image_centered.shape[0] * image_centered.shape[1])
                 if mask_area_prop < MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE:
-                    prWarning(f"[{episode}][{image_idx}][YOLO detection {yolo_detection_idx}] Mask area is too small ({mask_area_prop * 100:.2f}%). Skipping.")
+                    prWarning(f"[{episode}][{image_idx}/{len(images_list)}][YOLO detection {yolo_detection_idx}] Mask area is too small ({mask_area_prop * 100:.2f}%). Skipping.")
                     continue
                 
                 bbox_in_centered_image = get_bounding_box_torch(centered_image_mask)
@@ -1150,7 +1151,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 
                 # ... if it did not match, iterate on all the following images and keep checking if it does not match with any existing detection, otherwise save as new elements of the track ...
                 break_count = 0
-                for following_image_idx in tqdm(range(image_idx+1, len(images_list)), desc="[{}] Tracking with SAM2".format(current_sam2_track_id)):
+                for following_image_idx in tqdm(range(image_idx+1, len(images_list)), total=len(images_list)-image_idx-1, desc="[{}] Tracking with SAM2".format(current_sam2_track_id)):
                     following_image_file = images_list[following_image_idx]
                     following_image = Image.open(following_image_file)
                     following_image = np.array(following_image)
