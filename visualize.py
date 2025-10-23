@@ -7,6 +7,8 @@ import argparse
 import numpy as np
 import cv2
 import json
+import datetime
+import time
 from typing import List, Dict, Optional, Tuple
 
 # Add current directory to path for imports
@@ -18,7 +20,7 @@ from misc.visualize_utils import GOLIATH_SKELETON_INFO, GOLIATH_KPTS_COLORS, COC
 
 # Import torch and RLE tools
 import torch
-from misc.rle_tools import decode_RLE
+from misc.rle_tools import decode_RLE, encode_RLE
 
 MASK_RLE_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -27,7 +29,7 @@ try:
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QSlider, QPushButton, QCheckBox, QListWidget, QLabel, QSplitter,
         QGroupBox, QGridLayout, QListWidgetItem, QMessageBox, QStatusBar,
-        QSpinBox, QTabWidget, QComboBox
+        QSpinBox, QTabWidget, QComboBox, QInputDialog, QAbstractItemView
     )
     from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
     from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont, QKeySequence, QShortcut
@@ -344,6 +346,11 @@ class Interact360Visualizer(QMainWindow):
         # Track validity options
         self.show_invalid_tracks = True  # Show tracks that are not valid
         
+        # Edit mode options
+        self.edit_mode = False
+        self.edited_detections = {}  # Store local modifications
+        self.next_available_id = 0  # Next available track ID for splitting
+        
         # Plot time windows
         self.plot_window_past = 50
         self.plot_window_future = 20
@@ -616,12 +623,78 @@ class Interact360Visualizer(QMainWindow):
         
         layout.addWidget(options_group)
         
+        # Edit mode controls
+        edit_group = QGroupBox("Edit Mode")
+        edit_layout = QVBoxLayout(edit_group)
+        
+        # Edit mode toggle
+        self.edit_mode_cb = QCheckBox("Edit Mode [E]")
+        self.edit_mode_cb.setChecked(False)
+        self.edit_mode_cb.toggled.connect(self.toggle_edit_mode)
+        edit_layout.addWidget(self.edit_mode_cb)
+        
+        # Track editing controls (initially hidden)
+        self.track_edit_widget = QWidget()
+        track_edit_layout = QVBoxLayout(self.track_edit_widget)
+        
+        # Validity editing
+        validity_group = QGroupBox("Edit Track Validity")
+        validity_layout = QVBoxLayout(validity_group)
+        
+        validity_buttons_layout = QHBoxLayout()
+        self.set_valid_btn = QPushButton("Set Valid [V]")
+        self.set_valid_btn.clicked.connect(self.set_track_validity_valid)
+        validity_buttons_layout.addWidget(self.set_valid_btn)
+        
+        self.set_invalid_btn = QPushButton("Set Invalid [I]")
+        self.set_invalid_btn.clicked.connect(self.set_track_validity_invalid)
+        validity_buttons_layout.addWidget(self.set_invalid_btn)
+        
+        self.set_custom_btn = QPushButton("Set Custom [X]")
+        self.set_custom_btn.clicked.connect(self.set_track_validity_custom)
+        validity_buttons_layout.addWidget(self.set_custom_btn)
+        
+        validity_layout.addLayout(validity_buttons_layout)
+        track_edit_layout.addWidget(validity_group)
+        
+        # Track operations
+        operations_group = QGroupBox("Track Operations")
+        operations_layout = QVBoxLayout(operations_group)
+        
+        self.split_track_btn = QPushButton("Split Track [S]")
+        self.split_track_btn.clicked.connect(self.split_track)
+        operations_layout.addWidget(self.split_track_btn)
+        
+        self.merge_tracks_btn = QPushButton("Merge Selected Tracks [M]")
+        self.merge_tracks_btn.clicked.connect(self.merge_tracks)
+        operations_layout.addWidget(self.merge_tracks_btn)
+        
+        track_edit_layout.addWidget(operations_group)
+        
+        # Save changes
+        save_layout = QHBoxLayout()
+        self.save_changes_btn = QPushButton("Save Changes [Ctrl+S]")
+        self.save_changes_btn.clicked.connect(self.save_changes)
+        save_layout.addWidget(self.save_changes_btn)
+        
+        self.discard_changes_btn = QPushButton("Discard Changes [Ctrl+D]")
+        self.discard_changes_btn.clicked.connect(self.discard_changes)
+        save_layout.addWidget(self.discard_changes_btn)
+        
+        track_edit_layout.addLayout(save_layout)
+        
+        edit_layout.addWidget(self.track_edit_widget)
+        self.track_edit_widget.setVisible(False)
+        
+        layout.addWidget(edit_group)
+        
         # Track list
         track_group = QGroupBox("Tracks")
         track_layout = QVBoxLayout(track_group)
         
         self.track_list = QListWidget()
         self.track_list.setMaximumHeight(200)
+        self.track_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # Allow multiple selection
         self.track_list.itemClicked.connect(self.on_track_selected)
         track_layout.addWidget(self.track_list)
         
@@ -725,6 +798,11 @@ class Interact360Visualizer(QMainWindow):
         QShortcut(QKeySequence("P"), self, lambda: self.show_vitpose_poses_cb.setChecked(not self.show_vitpose_poses_cb.isChecked()))
         QShortcut(QKeySequence("Shift+P"), self, lambda: self.show_sapiens_poses_cb.setChecked(not self.show_sapiens_poses_cb.isChecked()))
         QShortcut(QKeySequence("V"), self, lambda: self.show_invalid_tracks_cb.setChecked(not self.show_invalid_tracks_cb.isChecked()))
+        
+        # Edit mode shortcuts
+        QShortcut(QKeySequence("E"), self, lambda: self.edit_mode_cb.setChecked(not self.edit_mode_cb.isChecked()))
+        QShortcut(QKeySequence("Ctrl+S"), self, self.save_changes)
+        QShortcut(QKeySequence("Ctrl+D"), self, self.discard_changes)
         
         # Track selection
         QShortcut(QKeySequence("Escape"), self, self.clear_track_selection)
@@ -982,11 +1060,17 @@ class Interact360Visualizer(QMainWindow):
         
         image_file = self.image_files[self.current_frame]
         # image_file_from_dict = self.detections[self.current_frame]["image_file"]
-        detections = self.detections[self.current_frame]["detections"] if self.current_frame in self.detections else []
+        
+        # Use edited detections if in edit mode and available
+        if self.edit_mode and self.current_frame in self.edited_detections:
+            detections = self.edited_detections[self.current_frame]["detections"]
+        else:
+            detections = self.detections[self.current_frame]["detections"] if self.current_frame in self.detections else []
         
         # Load image
         tic = time.time()
         image = cv2.imread(image_file)
+        self.image_height, self.image_width = image.shape[:2]
         if image is None:
             prError(f"Could not load image: {image_file}")
             return
@@ -1216,21 +1300,28 @@ class Interact360Visualizer(QMainWindow):
         """Update the track list widget"""
         self.track_list.clear()
         
-        if self.current_frame not in self.detections:
+        # Use edited detections if in edit mode and available
+        if self.edit_mode and self.current_frame in self.edited_detections:
+            detections = self.edited_detections[self.current_frame]["detections"]
+        elif self.current_frame in self.detections:
+            detections = self.detections[self.current_frame]["detections"]
+        else:
             return
-        
-        detections = self.detections[self.current_frame]["detections"]
         
         for det in detections:
             track_id = det.get("track_id", -1)
+            validity = det.get("validity", "valid")
             
             # Filter based on track validity if option is disabled
             if not self.show_invalid_tracks:
-                validity = det.get("validity", "valid")
                 if validity != "valid":
                     continue
             
-            track_text = f"Track {track_id}"
+            # Show validity status in track list
+            if self.edit_mode:
+                track_text = f"Track {track_id} ({validity})"
+            else:
+                track_text = f"Track {track_id}"
             color = self.get_track_color(track_id)
             
             item = QListWidgetItem(track_text)
@@ -1285,6 +1376,12 @@ class Interact360Visualizer(QMainWindow):
     
     def change_episode(self, index):
         """Change current episode"""
+        if self.edit_mode:
+            QMessageBox.warning(self, "Edit Mode", "Cannot switch episodes while in edit mode. Please save or discard changes first.")
+            # Reset combo box to current episode
+            self.episode_combo.setCurrentIndex(self.current_episode_idx)
+            return
+            
         if 0 <= index < len(self.episodes_list):
             if self.is_playing:
                 self.pause_playback()
@@ -1391,6 +1488,278 @@ class Interact360Visualizer(QMainWindow):
         self.show_invalid_tracks = checked
         self.update_image_display()
         self.update_track_list()
+    
+    def toggle_edit_mode(self, checked):
+        """Toggle edit mode"""
+        self.edit_mode = checked
+        self.track_edit_widget.setVisible(checked)
+        
+        if checked:
+            # Initialize edit mode with existing detections
+            self.edited_detections = {}
+            self.initialize_edited_detections()
+            self.calculate_next_available_id()
+            self.statusBar().showMessage("Edit mode enabled - Episode switching disabled")
+        else:
+            # Exit edit mode
+            if self.edited_detections:
+                reply = QMessageBox.question(self, "Unsaved Changes", 
+                                           "You have unsaved changes. Do you want to save them before exiting edit mode?",
+                                           QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+                if reply == QMessageBox.StandardButton.Save:
+                    self.save_changes()
+                elif reply == QMessageBox.StandardButton.Cancel:
+                    self.edit_mode_cb.setChecked(True)
+                    return
+                else:
+                    self.discard_changes()
+            
+            self.statusBar().showMessage("Edit mode disabled")
+        
+        self.update_track_list()
+    
+    def calculate_next_available_id(self):
+        """Calculate the next available track ID for splitting"""
+        max_id = -1
+        for frame_idx, frame_data in self.detections.items():
+            for det in frame_data.get("detections", []):
+                track_id = det.get("track_id", -1)
+                max_id = max(max_id, track_id)
+        self.next_available_id = max_id + 1
+    
+    def initialize_edited_detections(self):
+        """Initialize edited_detections with current detections"""
+        for frame_idx, frame_data in self.detections.items():
+            if "detections" in frame_data:
+                # Create a deep copy of the detections for this frame
+                self.edited_detections[frame_idx] = {
+                    "detections": [det.copy() for det in frame_data["detections"]]
+                }
+                # Copy other frame data if present
+                for key, value in frame_data.items():
+                    if key != "detections":
+                        self.edited_detections[frame_idx][key] = value
+    
+    def set_track_validity_valid(self):
+        """Set selected track validity to valid"""
+        if not self.edit_mode:
+            return
+        
+        selected_tracks = self.get_selected_tracks()
+        if not selected_tracks:
+            QMessageBox.warning(self, "No Selection", "Please select a track first.")
+            return
+        
+        for track_id in selected_tracks:
+            self.modify_track_validity(track_id, "valid")
+        
+        self.update_image_display()
+        self.update_track_list()
+    
+    def set_track_validity_invalid(self):
+        """Set selected track validity to invalid"""
+        if not self.edit_mode:
+            return
+        
+        selected_tracks = self.get_selected_tracks()
+        if not selected_tracks:
+            QMessageBox.warning(self, "No Selection", "Please select a track first.")
+            return
+        
+        for track_id in selected_tracks:
+            self.modify_track_validity(track_id, "invalid")
+        
+        self.update_image_display()
+        self.update_track_list()
+    
+    def set_track_validity_custom(self):
+        """Set selected track validity to custom flag"""
+        if not self.edit_mode:
+            return
+        
+        selected_tracks = self.get_selected_tracks()
+        if not selected_tracks:
+            QMessageBox.warning(self, "No Selection", "Please select a track first.")
+            return
+        
+        # Get custom flag from user
+        text, ok = QInputDialog.getText(
+            self, 
+            'Custom Validity Flag',
+            f'Enter custom validity flag for {len(selected_tracks)} track(s):',
+            text=''
+        )
+        
+        if ok and text:
+            for track_id in selected_tracks:
+                self.modify_track_validity(track_id, text.strip())
+            
+            self.update_image_display()
+            self.update_track_list()
+    
+    def modify_track_validity(self, track_id, new_validity):
+        """Modify track validity in edited detections"""
+        for frame_idx, frame_data in self.edited_detections.items():
+            for det in frame_data.get("detections", []):
+                if det.get("track_id", -1) == track_id:
+                    # Directly modify the detection in edited_detections
+                    det["validity"] = new_validity
+    
+    def split_track(self):
+        """Split selected track at current frame"""
+        if not self.edit_mode:
+            return
+        
+        selected_tracks = self.get_selected_tracks()
+        if len(selected_tracks) != 1:
+            QMessageBox.warning(self, "Invalid Selection", "Please select exactly one track to split.")
+            return
+        
+        track_id = selected_tracks[0]
+        new_track_id = self.next_available_id
+        self.next_available_id += 1
+        
+        # Split track from current frame onwards
+        for frame_idx in range(self.current_frame, len(self.edited_detections)):
+            if frame_idx in self.edited_detections:
+                for det in self.edited_detections[frame_idx].get("detections", []):
+                    if det.get("track_id", -1) == track_id:
+                        # Directly modify the track ID in edited_detections
+                        det["track_id"] = new_track_id
+        
+        self.statusBar().showMessage(f"Track {track_id} split at frame {self.current_frame}. New track ID: {new_track_id}")
+        self.update_image_display()
+        self.update_track_list()
+    
+    def merge_tracks(self):
+        """Merge selected tracks"""
+        if not self.edit_mode:
+            return
+        
+        selected_tracks = self.get_selected_tracks()
+        if len(selected_tracks) != 2:
+            QMessageBox.warning(self, "Invalid Selection", "Please select exactly two tracks to merge.")
+            return
+        
+        new_track_id = self.next_available_id
+        self.next_available_id += 1
+        
+        for frame_idx, frame_data in self.edited_detections.items():
+            det_tracks_ids_in_frame = [det["track_id"] for det in frame_data["detections"]]
+            det_idxs_tracks_ids_to_merge = [idx for idx, track_id in enumerate(det_tracks_ids_in_frame) if track_id in selected_tracks]
+            if len(det_idxs_tracks_ids_to_merge) == 1:
+                frame_data["detections"][det_idxs_tracks_ids_to_merge[0]]["track_id"] = new_track_id
+                
+            elif len(det_idxs_tracks_ids_to_merge) == 2:
+                # merge the two tracks into one
+                det1 = frame_data["detections"][det_idxs_tracks_ids_to_merge[0]]
+                det1_mask_size = det1["mask_size"]
+                det2 = frame_data["detections"][det_idxs_tracks_ids_to_merge[1]]
+                det2_mask_size = det2["mask_size"]
+                
+                biggest_det = det1 if det1_mask_size > det2_mask_size else det2
+                smallest_det = det2 if det1_mask_size > det2_mask_size else det1
+                
+                biggest_det_mask = decode_RLE(torch.tensor([int(x) for x in biggest_det["mask_rle"].split(",")] , dtype=torch.int32).to(MASK_RLE_DEVICE), (self.image_height, self.image_width))
+                smallest_det_mask = decode_RLE(torch.tensor([int(x) for x in smallest_det["mask_rle"].split(",")], dtype=torch.int32).to(MASK_RLE_DEVICE), (self.image_height, self.image_width))
+                
+                merged_mask = biggest_det_mask | smallest_det_mask
+                merged_mask_rle = encode_RLE(merged_mask)
+                merged_mask_size = merged_mask.sum().item()
+                merged_mask_rle_str = ",".join([str(x) for x in merged_mask_rle.tolist()])
+                
+                merged_det = biggest_det.copy()
+                merged_det["track_id"] = new_track_id
+                merged_det["mask_rle"] = merged_mask_rle_str
+                merged_det["mask_size"] = merged_mask_size
+                merged_det["xmin"] = min(biggest_det["xmin"], smallest_det["xmin"])
+                merged_det["ymin"] = min(biggest_det["ymin"], smallest_det["ymin"])
+                merged_det["xmax"] = max(biggest_det["xmax"], smallest_det["xmax"])
+                merged_det["ymax"] = max(biggest_det["ymax"], smallest_det["ymax"])
+                
+                frame_data["detections"].append(merged_det)
+                frame_data["detections"] = [det for det in frame_data["detections"] if det["track_id"] not in selected_tracks] # remove older tracks
+                
+            elif len(det_idxs_tracks_ids_to_merge) > 2:
+                # should not happen
+                raise ValueError(f"More than 2 tracks to merge in frame {frame_idx}: {det_idxs_tracks_ids_to_merge}")
+            else:
+                # do nothing we have 0 tracks to merge
+                pass
+        self.statusBar().showMessage(f"Merged tracks {selected_tracks} into track {new_track_id}")
+        self.update_image_display()
+        self.update_track_list()
+    
+    def get_selected_tracks(self):
+        """Get list of selected track IDs"""
+        selected_tracks = []
+        for item in self.track_list.selectedItems():
+            track_id = item.data(Qt.ItemDataRole.UserRole)
+            if track_id is not None:
+                selected_tracks.append(track_id)
+        return selected_tracks
+    
+    def save_changes(self):
+        """Save edited detections to file with backup"""
+        if not self.edited_detections:
+            QMessageBox.information(self, "No Changes", "No changes to save.")
+            return
+        
+        try:
+            # Create backup
+            session, episode = self.episodes_list[self.current_episode_idx]
+            episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
+            detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
+            
+            if os.path.exists(detection_file):
+                # Create timestamped backup
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_file = os.path.join(episode_dir, f"sam2_detections_360_backup_{timestamp}.json")
+                import shutil
+                shutil.copy2(detection_file, backup_file)
+                self.statusBar().showMessage(f"Backup created: {os.path.basename(backup_file)}")
+            
+            # Apply changes to original detections
+            for frame_idx, frame_data in self.edited_detections.items():
+                if frame_idx in self.detections:
+                    # Replace original detections with edited ones
+                    self.detections[frame_idx]["detections"] = frame_data["detections"]
+            
+            # Save to file
+            self.save_detections_to_file()
+            
+            # Clear edited detections
+            self.edited_detections = {}
+            
+            QMessageBox.information(self, "Success", "Changes saved successfully!")
+            self.statusBar().showMessage("Changes saved successfully")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save changes: {str(e)}")
+    
+    def discard_changes(self):
+        """Discard all edited changes"""
+        self.edited_detections = {}
+        self.update_image_display()
+        self.update_track_list()
+        self.statusBar().showMessage("Changes discarded")
+    
+    def save_detections_to_file(self):
+        """Save current detections to JSON file"""
+        session, episode = self.episodes_list[self.current_episode_idx]
+        episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
+        detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
+        
+        # Convert detections back to list format
+        detections_list = []
+        for frame_idx in sorted(self.detections.keys()):
+            frame_data = self.detections[frame_idx]
+            if "image_file" in frame_data:
+                detections_list.append(frame_data)
+        
+        # Write to file
+        with open(detection_file, 'w') as f:
+            json.dump(detections_list, f, indent=2)
 
 
 def main():
