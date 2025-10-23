@@ -212,7 +212,7 @@ def main(args, ep, pose_estimator):
             batch_images_files.append(image_file)
             
 
-            image_path = os.path.join(args.dir, "episodes", ep, "images_360", image_file)
+            image_path = os.path.join(args.dir, "episodes", ep, "images_360", os.path.basename(image_file))
             assert os.path.exists(image_path), f"Image path {image_path} does not exist"
             image = np.array(cv2.imread(image_path)) # H, W, C
             images_batch.append(image)
