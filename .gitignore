@@ -6,6 +6,7 @@ checkpoints/sam2.1_hiera_tiny.pt
 demo/output/*.mkv
 demo/output/*.mp4
 demo/output/*.jpg
+demo/output/*_copy_*.json
 demo/data/SSUP_SAMPLE_0.mp4
 checkpoints/.locks
 checkpoints/models--usyd-community--vitpose-base-simple
