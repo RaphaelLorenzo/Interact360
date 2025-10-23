@@ -175,7 +175,7 @@ def process_episode(args, ep, image_processor, model, device):
         image_width, image_height = image.size
         
         detections = detections_dict[image_idx]["detections"]
-        
+
         person_boxes = [] # list of list such that it is interepreted as a batch of one box
         valid_boxes_idxs = []
         images_centered_on_valid_detections = []
@@ -200,30 +200,33 @@ def process_episode(args, ep, image_processor, model, device):
 
         if len(valid_boxes_idxs) > 0:
             
-            # person_boxes = np.array(person_boxes) # NDet, 4
-            # prDebug(f"Processing {len(valid_boxes_idxs)} valid detections / {len(images_centered_on_valid_detections)} images centered on valid detections / {len(images_xmins_centered_on_valid_detections)} xmins centered on valid detections")
-            # print(person_boxes)
-            
-            inputs = image_processor(images_centered_on_valid_detections, boxes=person_boxes, return_tensors="pt").to(device) # NOTE : this does not allow to put the masks on the images / Must be sure that the box contains only one person
-
-            with torch.no_grad():
-                outputs = model(**inputs)
-
-            pose_results = image_processor.post_process_pose_estimation(outputs, boxes=person_boxes)
-            del inputs, outputs
-            torch.cuda.empty_cache()
-                        
-            for pose, detection_idx, image_xmin in zip(pose_results, valid_boxes_idxs, images_xmins_centered_on_valid_detections):
-                keypoints = pose[0]["keypoints"].cpu().numpy() # shape (NKP, 2)
-                keypoints = get_full_image_keypoints(keypoints, image_xmin, (image_height, image_width))
-                keypoints = keypoints.flatten().tolist()
-                keypoints = [int(coord) for coord in keypoints]
+            for batch_idx in range(0, len(valid_boxes_idxs), args.batch_size):
                 
-                scores = pose[0]["scores"].cpu().numpy().flatten().tolist()
-                scores = [np.round(float(score), 2) for score in scores]
+                images_centered_on_valid_detections_batch = images_centered_on_valid_detections[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]
+                person_boxes_batch = person_boxes[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]
+                images_xmins_centered_on_valid_detections_batch = images_xmins_centered_on_valid_detections[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]
+                valid_boxes_idxs_batch = valid_boxes_idxs[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]
                 
-                detections_dict[image_idx]["detections"][detection_idx]["keypoints_vitpose"] = keypoints
-                detections_dict[image_idx]["detections"][detection_idx]["scores_vitpose"] = scores
+                inputs = image_processor(images_centered_on_valid_detections_batch, boxes=person_boxes_batch, return_tensors="pt").to(device) # NOTE : this does not allow to put the masks on the images / Must be sure that the box contains only one person
+
+                with torch.no_grad():
+                    outputs = model(**inputs)
+
+                pose_results = image_processor.post_process_pose_estimation(outputs, boxes=person_boxes_batch)
+                del inputs, outputs
+                torch.cuda.empty_cache()
+                            
+                for pose, detection_idx, image_xmin in zip(pose_results, valid_boxes_idxs_batch, images_xmins_centered_on_valid_detections_batch):
+                    keypoints = pose[0]["keypoints"].cpu().numpy() # shape (NKP, 2)
+                    keypoints = get_full_image_keypoints(keypoints, image_xmin, (image_height, image_width))
+                    keypoints = keypoints.flatten().tolist()
+                    keypoints = [int(coord) for coord in keypoints]
+                    
+                    scores = pose[0]["scores"].cpu().numpy().flatten().tolist()
+                    scores = [np.round(float(score), 2) for score in scores]
+                    
+                    detections_dict[image_idx]["detections"][detection_idx]["keypoints_vitpose"] = keypoints
+                    detections_dict[image_idx]["detections"][detection_idx]["scores_vitpose"] = scores
             
         for idx in invalid_boxes_idxs:
             detections_dict[image_idx]["detections"][idx]["keypoints_vitpose"] = [-1] * 17 * 2 # 17 keypoints, 2 coordinates
@@ -238,7 +241,7 @@ if __name__ == "__main__":
     parser.add_argument("--dir", "-d", type=str, default="./output/rosbags_2025_03_26_15_25_25")
     parser.add_argument("--episodes", "-e", type=str, default="all")
     parser.add_argument("--workers", "-w", type=int, default=0)
-    
+    parser.add_argument("--batch_size", "-b", type=int, default=16)
 
     args = parser.parse_args()
     
