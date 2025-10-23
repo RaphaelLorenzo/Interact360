@@ -81,3 +81,4 @@ ultralytics==8.3.133
 PyQt6 
 pyqtgraph
 transformers
+json_tricks
