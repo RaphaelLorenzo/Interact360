@@ -9,7 +9,7 @@
 sudo apt-get install ffmpeg
 ```
 
-- Create a conda environment and install dependencies (install torch accordingly to your CUDA version)
+- Create a conda environment and install dependencies (install torch accordingly to your CUDA version. Note that to use the `bfloat16` optimized models of Sapiens for A100/H100 you will need `torch==2.3.1` if you don't plan on using this, you can just go with a newer version of `torch`)
 ```
 conda create --name interact360_env python=3.10
 conda activate interact360_env

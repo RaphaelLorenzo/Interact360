@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(__file__))
 
 from misc.print_utils import *
 from misc.other_utils import *
+from misc.visualize_utils import GOLIATH_SKELETON_INFO, GOLIATH_KPTS_COLORS, COCO_EDGES
 
 # Import torch and RLE tools
 import torch
@@ -334,6 +335,12 @@ class Interact360Visualizer(QMainWindow):
         self.show_interaction_zone = False  # Option to constantly display interaction zone
         self.mask_opacity = 30  # Default 30% opacity
         
+        # Pose visualization options
+        self.show_vitpose_poses = False
+        self.show_sapiens_poses = False
+        self.vitpose_min_score = 0.6  # Minimum score for ViTPose keypoints
+        self.sapiens_min_score = 0.6  # Minimum score for Sapiens keypoints
+        
         # Plot time windows
         self.plot_window_past = 50
         self.plot_window_future = 20
@@ -555,6 +562,39 @@ class Interact360Visualizer(QMainWindow):
         self.show_interaction_zone_cb.toggled.connect(self.toggle_show_interaction_zone)
         options_layout.addWidget(self.show_interaction_zone_cb)
         
+        # Pose visualization options
+        self.show_vitpose_poses_cb = QCheckBox("Show ViTPose Poses [P]")
+        self.show_vitpose_poses_cb.setChecked(False)
+        self.show_vitpose_poses_cb.toggled.connect(self.toggle_show_vitpose_poses)
+        options_layout.addWidget(self.show_vitpose_poses_cb)
+        
+        self.show_sapiens_poses_cb = QCheckBox("Show Sapiens Poses [Shift+P]")
+        self.show_sapiens_poses_cb.setChecked(False)
+        self.show_sapiens_poses_cb.toggled.connect(self.toggle_show_sapiens_poses)
+        options_layout.addWidget(self.show_sapiens_poses_cb)
+        
+        # ViTPose minimum score control
+        vitpose_score_layout = QHBoxLayout()
+        vitpose_score_layout.addWidget(QLabel("ViTPose Min Score:"))
+        self.vitpose_score_spin = QSpinBox()
+        self.vitpose_score_spin.setRange(0, 100)
+        self.vitpose_score_spin.setValue(int(self.vitpose_min_score * 100))
+        self.vitpose_score_spin.setSuffix("%")
+        self.vitpose_score_spin.valueChanged.connect(self.update_vitpose_min_score)
+        vitpose_score_layout.addWidget(self.vitpose_score_spin)
+        options_layout.addLayout(vitpose_score_layout)
+        
+        # Sapiens minimum score control
+        sapiens_score_layout = QHBoxLayout()
+        sapiens_score_layout.addWidget(QLabel("Sapiens Min Score:"))
+        self.sapiens_score_spin = QSpinBox()
+        self.sapiens_score_spin.setRange(0, 100)
+        self.sapiens_score_spin.setValue(int(self.sapiens_min_score * 100))
+        self.sapiens_score_spin.setSuffix("%")
+        self.sapiens_score_spin.valueChanged.connect(self.update_sapiens_min_score)
+        sapiens_score_layout.addWidget(self.sapiens_score_spin)
+        options_layout.addLayout(sapiens_score_layout)
+        
         # Mask opacity control
         mask_opacity_layout = QHBoxLayout()
         mask_opacity_layout.addWidget(QLabel("Mask Opacity:"))
@@ -674,6 +714,8 @@ class Interact360Visualizer(QMainWindow):
         QShortcut(QKeySequence("T"), self, lambda: self.show_track_ids_cb.setChecked(not self.show_track_ids_cb.isChecked()))
         QShortcut(QKeySequence("I"), self, lambda: self.show_interaction_highlights_cb.setChecked(not self.show_interaction_highlights_cb.isChecked()))
         QShortcut(QKeySequence("Z"), self, lambda: self.show_interaction_zone_cb.setChecked(not self.show_interaction_zone_cb.isChecked()))
+        QShortcut(QKeySequence("P"), self, lambda: self.show_vitpose_poses_cb.setChecked(not self.show_vitpose_poses_cb.isChecked()))
+        QShortcut(QKeySequence("Shift+P"), self, lambda: self.show_sapiens_poses_cb.setChecked(not self.show_sapiens_poses_cb.isChecked()))
         
         # Track selection
         QShortcut(QKeySequence("Escape"), self, self.clear_track_selection)
@@ -1083,6 +1125,70 @@ class Interact360Visualizer(QMainWindow):
                     # Fall back to thick bounding box when masks not available
                     x1, y1, x2, y2 = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
                     cv2.rectangle(image_copy, (x1, y1), (x2, y2), color, 8)
+            
+            # Draw ViTPose keypoints and skeleton if enabled
+            if self.show_vitpose_poses:
+                # Draw ViTPose keypoints if available
+                scores_vitpose = det.get("scores_vitpose", [0.0]*17)
+                if len(scores_vitpose) >= 17 and np.array(scores_vitpose).max() > self.vitpose_min_score:
+                    keypoints = det.get("keypoints_vitpose", [])
+                    if len(keypoints) >= 34:  # 17 keypoints * 2 coordinates
+                        keypoints = np.array(keypoints).reshape(17, 2)
+                        
+                        # Choose pose color based on mask opacity
+                        pose_color = (255, 255, 255) if self.mask_opacity > 80 else color  # White if high opacity
+                        
+                        # Draw keypoints
+                        for i in range(keypoints.shape[0]):
+                            if i < len(scores_vitpose) and scores_vitpose[i] > self.vitpose_min_score:
+                                kp_x, kp_y = int(keypoints[i, 0]), int(keypoints[i, 1])
+                                if kp_x > 0 and kp_y > 0:
+                                    cv2.circle(image_copy, (kp_x, kp_y), 3, pose_color, -1)
+                        
+                        # Draw skeleton connections
+                        for edge in COCO_EDGES:
+                            if (edge[0] < len(scores_vitpose) and edge[1] < len(scores_vitpose) and 
+                                scores_vitpose[edge[0]] > self.vitpose_min_score and scores_vitpose[edge[1]] > self.vitpose_min_score):
+                                pt1 = (int(keypoints[edge[0], 0]), int(keypoints[edge[0], 1]))
+                                pt2 = (int(keypoints[edge[1], 0]), int(keypoints[edge[1], 1]))
+                                if pt1[0] > 0 and pt1[1] > 0 and pt2[0] > 0 and pt2[1] > 0:
+                                    cv2.line(image_copy, pt1, pt2, pose_color, 2)
+            
+            # Draw Sapiens keypoints and skeleton if enabled
+            if self.show_sapiens_poses:
+                # Draw Sapiens keypoints if available
+                det_keys = list(det.keys())
+                det_keys_sapiens = [key for key in det_keys if key.startswith("scores_sapiens")] # scores_sapiens_308_03b for example (scores_sapiens_NKPTS_MODEL)
+                if len(det_keys_sapiens) > 0:
+                    sapiens_model = det_keys_sapiens[0].split("_")[-1] # if several possibility always take the first one
+                    sapiens_num_keypoints = int(det_keys_sapiens[0].split("_")[2]) # if several possibility always take the first one
+                    assert sapiens_num_keypoints == 308, "Sapiens number of keypoints {} not supported (only 308 for now)".format(sapiens_num_keypoints)
+                    sapiens_score_key = f"scores_sapiens_{sapiens_num_keypoints}_{sapiens_model}"
+                    sapiens_keypoints_key = f"keypoints_sapiens_{sapiens_num_keypoints}_{sapiens_model}"
+                    sapiens_scores = det.get(sapiens_score_key, [0.0]*sapiens_num_keypoints)
+                    sapiens_keypoints = det.get(sapiens_keypoints_key, [])
+                    if len(sapiens_scores) >= sapiens_num_keypoints and np.array(sapiens_scores).max() > self.sapiens_min_score:
+                        sapiens_keypoints = np.array(sapiens_keypoints).reshape(sapiens_num_keypoints, 2)
+                        
+                        # Draw keypoints
+                        for i in range(sapiens_keypoints.shape[0]):
+                            if sapiens_scores[i] > self.sapiens_min_score:
+                                kpt_color = GOLIATH_KPTS_COLORS[i]
+                                kp_x, kp_y = int(sapiens_keypoints[i, 0]), int(sapiens_keypoints[i, 1])
+                                if kp_x > 0 and kp_y > 0:
+                                    cv2.circle(image_copy, (kp_x, kp_y), 3, kpt_color, -1)
+                                
+                        # Draw skeleton connections
+                        for edge_idx in GOLIATH_SKELETON_INFO:
+                            edge = GOLIATH_SKELETON_INFO[edge_idx]
+                            kp1_score = sapiens_scores[edge["link"][0]]
+                            kp2_score = sapiens_scores[edge["link"][1]]
+                            if kp1_score > self.sapiens_min_score and kp2_score > self.sapiens_min_score:
+                                edge_color = edge["color"]
+                                kp_x1, kp_y1 = int(sapiens_keypoints[edge["link"][0], 0]), int(sapiens_keypoints[edge["link"][0], 1])
+                                kp_x2, kp_y2 = int(sapiens_keypoints[edge["link"][1], 0]), int(sapiens_keypoints[edge["link"][1], 1])
+                                if kp_x1 > 0 and kp_y1 > 0 and kp_x2 > 0 and kp_y2 > 0:
+                                    cv2.line(image_copy, (kp_x1, kp_y1), (kp_x2, kp_y2), edge_color, 2)
         
         return image_copy
     
@@ -1232,6 +1338,26 @@ class Interact360Visualizer(QMainWindow):
     def toggle_show_interaction_zone(self, checked):
         self.show_interaction_zone = checked
         self.update_image_display()
+    
+    def toggle_show_vitpose_poses(self, checked):
+        self.show_vitpose_poses = checked
+        self.update_image_display()
+    
+    def toggle_show_sapiens_poses(self, checked):
+        self.show_sapiens_poses = checked
+        self.update_image_display()
+    
+    def update_vitpose_min_score(self, value):
+        """Update ViTPose minimum score threshold"""
+        self.vitpose_min_score = value / 100.0
+        if self.show_vitpose_poses:
+            self.update_image_display()
+    
+    def update_sapiens_min_score(self, value):
+        """Update Sapiens minimum score threshold"""
+        self.sapiens_min_score = value / 100.0
+        if self.show_sapiens_poses:
+            self.update_image_display()
 
 
 def main():
