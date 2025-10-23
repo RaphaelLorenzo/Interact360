@@ -1307,6 +1307,10 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         for det in image_detections["detections"]:
             mask_rle_list = det["mask_rle"].cpu().numpy().tolist()
             det["mask_rle"] = ",".join([str(int(x)) for x in mask_rle_list])
+            # make sure we dont have negative coordinates (convert them to positive, even if it means xmax > image_width)
+            if det["xmin"] < 0:
+                det["xmin"] += original_image_width
+                det["xmax"] += original_image_width
         sam2_detections_output_list.append(image_detections)
     
     # Filter isolated detections

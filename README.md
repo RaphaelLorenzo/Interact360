@@ -17,6 +17,13 @@ pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https
 pip install -r requirements.txt
 ```
 
+- Download the checkpoints
+```
+cd checkpoints
+./download_ckpts.sh
+cd ../
+```
+
 ## Run
 
 Place your video under `./demo/data` (or use `-i` to change the input video path and `-s` for the ouput saving path, then the appropriate `-d` to run outside of the directory)
@@ -41,9 +48,9 @@ Where `-izt 2688,1042,4585,1919` is the bounding box of the interaction zone in 
 
 
 ```
-python ./process/extract_images.py -i ./demo/data/2025_06_13_11_15_31_Theta360.mkv -em time -met 300
-python ./process/detect_segment_and_track.py -d ./demo/output/2025_06_13_11_15_31_Theta360 -sm large -ybs 32 -sibs 16
-python ./process/detect_interactions.py -d ./demo/output/2025_06_13_11_15_31_Theta360
+python ./process/extract_images.py -i ./demo/data/SalleClubInteract.mp4 -em time -met 60
+python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract -sm tiny -ybs 8 -sibs 8
+python ./process/detect_interactions.py -d ./demo/output/SalleClubInteract
 ```
 
 Then you can see the result in the visualizer !

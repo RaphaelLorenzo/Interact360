@@ -18,8 +18,6 @@ from misc.other_utils import *
 from misc.rle_tools import decode_RLE
 
 
-MIN_PIXELS_INTERSECTION = 10000
-
 
 def main(args, episode: str):
     """ Main function to get the engagement levels for the tracks
@@ -71,7 +69,7 @@ def main(args, episode: str):
                 compared_mask = decode_RLE(torch.from_numpy(compared_mask_rle), shape = (height, width))
                 intersection_sum = torch.sum(compared_mask & mask)
                 
-            if intersection_sum > MIN_PIXELS_INTERSECTION:
+            if intersection_sum > args.min_pixels_intersection:
                 det["engagement_level"] = 3
             else:
                 det["engagement_level"] = 0
@@ -85,6 +83,7 @@ if __name__ == "__main__":
     parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360", help="Directory to use (default: %(default)s)")
     parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all' (default: %(default)s)")
     parser.add_argument("--intersection_mask_path", "-imp", type=str, default="./assets/default_mask_intersection_zone.png", help="Intersection mask path (default: %(default)s)")
+    parser.add_argument("--min_pixels_intersection", "-mpi", type=int, default=10000, help="Minimum pixels intersection to consider a detection as interacting (default: %(default)s)")
     args = parser.parse_args()
     
     assert os.path.isdir(args.dir), "Directory should exist at {}".format(args.dir)

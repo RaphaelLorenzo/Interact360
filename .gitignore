@@ -1,4 +1,5 @@
 *.mkv
+*.mp4
 *.jpg
 __pycache__/
 checkpoints/sam2.1_hiera_tiny.pt
@@ -7,7 +8,6 @@ demo/output/*.mkv
 demo/output/*.mp4
 demo/output/*.jpg
 demo/output/*/*/*/sam2_detections_360_copy_*.json
-demo/data/SSUP_SAMPLE_0.mp4
 checkpoints/.locks
 checkpoints/models--usyd-community--vitpose-base-simple
 test_masks.py
