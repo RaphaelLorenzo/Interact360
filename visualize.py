@@ -341,6 +341,9 @@ class Interact360Visualizer(QMainWindow):
         self.vitpose_min_score = 0.6  # Minimum score for ViTPose keypoints
         self.sapiens_min_score = 0.6  # Minimum score for Sapiens keypoints
         
+        # Track validity options
+        self.show_invalid_tracks = True  # Show tracks that are not valid
+        
         # Plot time windows
         self.plot_window_past = 50
         self.plot_window_future = 20
@@ -573,6 +576,11 @@ class Interact360Visualizer(QMainWindow):
         self.show_sapiens_poses_cb.toggled.connect(self.toggle_show_sapiens_poses)
         options_layout.addWidget(self.show_sapiens_poses_cb)
         
+        self.show_invalid_tracks_cb = QCheckBox("Show Invalid Tracks [V]")
+        self.show_invalid_tracks_cb.setChecked(True)
+        self.show_invalid_tracks_cb.toggled.connect(self.toggle_show_invalid_tracks)
+        options_layout.addWidget(self.show_invalid_tracks_cb)
+        
         # ViTPose minimum score control
         vitpose_score_layout = QHBoxLayout()
         vitpose_score_layout.addWidget(QLabel("ViTPose Min Score:"))
@@ -716,6 +724,7 @@ class Interact360Visualizer(QMainWindow):
         QShortcut(QKeySequence("Z"), self, lambda: self.show_interaction_zone_cb.setChecked(not self.show_interaction_zone_cb.isChecked()))
         QShortcut(QKeySequence("P"), self, lambda: self.show_vitpose_poses_cb.setChecked(not self.show_vitpose_poses_cb.isChecked()))
         QShortcut(QKeySequence("Shift+P"), self, lambda: self.show_sapiens_poses_cb.setChecked(not self.show_sapiens_poses_cb.isChecked()))
+        QShortcut(QKeySequence("V"), self, lambda: self.show_invalid_tracks_cb.setChecked(not self.show_invalid_tracks_cb.isChecked()))
         
         # Track selection
         QShortcut(QKeySequence("Escape"), self, self.clear_track_selection)
@@ -1028,6 +1037,12 @@ class Interact360Visualizer(QMainWindow):
             track_id = det.get("track_id", -1)
             engagement_level = det.get("engagement_level", det.get("engagement_level_auto", -1))
             
+            # Filter based on track validity if option is disabled
+            if not self.show_invalid_tracks:
+                validity = det.get("validity", "valid")
+                if validity != "valid":
+                    continue
+            
             # Get color
             color = self.get_track_color(track_id)
             
@@ -1208,6 +1223,13 @@ class Interact360Visualizer(QMainWindow):
         
         for det in detections:
             track_id = det.get("track_id", -1)
+            
+            # Filter based on track validity if option is disabled
+            if not self.show_invalid_tracks:
+                validity = det.get("validity", "valid")
+                if validity != "valid":
+                    continue
+            
             track_text = f"Track {track_id}"
             color = self.get_track_color(track_id)
             
@@ -1363,6 +1385,12 @@ class Interact360Visualizer(QMainWindow):
         self.sapiens_min_score = value / 100.0
         if self.show_sapiens_poses:
             self.update_image_display()
+    
+    def toggle_show_invalid_tracks(self, checked):
+        """Toggle display of invalid tracks"""
+        self.show_invalid_tracks = checked
+        self.update_image_display()
+        self.update_track_list()
 
 
 def main():
