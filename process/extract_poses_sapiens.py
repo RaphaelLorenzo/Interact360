@@ -119,6 +119,88 @@ def crop_resize_and_normalize(orig_img, bboxes_list, sam2_masks_list, sapiens_or
         
     return preprocessed_images, extended_padded_bboxes
 
+def crop_resize_and_normalize_in_360_image(orig_img, bboxes_list, sam2_masks_list, sapiens_original_input_shape, mean, std, draw_boxes = True, show_bboxes = False):
+    """Preprocess pose images and bboxes in a 360 image (handle the wrapping of the image)."""
+    preprocessed_images = []
+    extended_padded_bboxes = []
+    # cropped_images = []
+    # Create a new element for each box
+
+    for bbox_idx, bbox in enumerate(bboxes_list):    
+        
+        sam2_mask = sam2_masks_list[bbox_idx]
+            
+        # Set the padding ratio
+        pad_ratio = 1.25
+        desired_aspect_ratio = sapiens_original_input_shape[1] / sapiens_original_input_shape[0] # width / height of the model
+
+        # Calculate the padded bbox
+        x_center = (bbox[0] + bbox[2]) / 2
+        y_center = (bbox[1] + bbox[3]) / 2
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        padded_box_width = width * pad_ratio
+        padded_box_height = height * pad_ratio
+        padded_bbox = np.array([x_center - (padded_box_width / 2), y_center - (padded_box_height / 2), x_center + (padded_box_width / 2), y_center + (padded_box_height / 2)])
+        
+        # Calculate the extended padded bbox with the desired aspect ratio
+        if (padded_box_width / padded_box_height) > desired_aspect_ratio:
+            extended_padded_box_height = padded_box_width / desired_aspect_ratio
+            extended_padded_box_width = padded_box_width
+        else:
+            extended_padded_box_width = padded_box_height * desired_aspect_ratio
+            extended_padded_box_height = padded_box_height
+            
+        extended_padded_bbox = np.array([x_center - (extended_padded_box_width / 2), y_center - (extended_padded_box_height / 2), x_center + (extended_padded_box_width / 2), y_center + (extended_padded_box_height / 2)])
+        
+        # Store the extended padded bbox
+        extended_padded_bboxes.append(extended_padded_bbox)
+        
+        
+        # Crop, resize and normalize the image
+        orig_img_tensor = torch.from_numpy(orig_img).permute(2, 0, 1).clone() # C, H, W
+        orig_img_tensor[:, sam2_mask == 0] = 0 # set the background to 0
+        
+        # let's cheat : we double the image horizontally so that the crop can take part of the other side of the image
+        orig_img_tensor = torch.cat([orig_img_tensor, orig_img_tensor], dim=2)
+        
+        cropped_img = crop(orig_img_tensor, int(extended_padded_bbox[1]), int(extended_padded_bbox[0]), int(extended_padded_bbox[3] - extended_padded_bbox[1]), int(extended_padded_bbox[2] - extended_padded_bbox[0])) # shape: (C, H, W)
+        cropped_img_resized = resize(cropped_img, (sapiens_original_input_shape[0], sapiens_original_input_shape[1]), interpolation=Image.BILINEAR) # shape: (C, H, W)
+        cropped_img_resized = cropped_img_resized.float()
+        mean = torch.Tensor(mean).view(-1, 1, 1)
+        std = torch.Tensor(std).view(-1, 1, 1)
+        cropped_img_resized = (cropped_img_resized - mean) / std
+        
+        # Store the preprocessed image
+        preprocessed_images.append(cropped_img_resized)
+        
+        # Draw the bboxes on the image and show it
+        if draw_boxes or show_bboxes:
+            cv2.rectangle(orig_img, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 0, 255), 2)
+            cv2.putText(orig_img, "original bbox", (int(bbox[0]), int(bbox[1]-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            cv2.rectangle(orig_img, (int(padded_bbox[0]), int(padded_bbox[1])), (int(padded_bbox[2]), int(padded_bbox[3])), (0, 255, 255), 2)
+            cv2.putText(orig_img, "padded bbox", (int(padded_bbox[0]), int(padded_bbox[1]-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            cv2.rectangle(orig_img, (int(extended_padded_bbox[0]), int(extended_padded_bbox[1])), (int(extended_padded_bbox[2]), int(extended_padded_bbox[3])), (0, 255, 0), 2)
+            cv2.putText(orig_img, "padded bbox with desired ratio", (int(extended_padded_bbox[0]), int(extended_padded_bbox[1]+20)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+            cropped_img_resized_np = cropped_img_resized.numpy().transpose(1, 2, 0)
+
+            if show_bboxes:
+                cv2.imshow("Image with bboxes (type any key to continue)", orig_img)        
+                key = cv2.waitKey(0)
+                # if key == ord('q') or key == 27:
+                #     exit()
+                cv2.destroyAllWindows()
+                
+                cv2.imshow("Cropped, resized and normalized image (type any key to continue)", cropped_img_resized_np)
+                key = cv2.waitKey(0)
+                # if key == ord('q') or key == 27:
+                #     exit()
+                cv2.destroyAllWindows()
+
+        
+    return preprocessed_images, extended_padded_bboxes
+
 
 def batch_inference_topdown(
     model: nn.Module,
@@ -283,9 +365,9 @@ def main(args, ep, pose_estimator):
         pose_imgs, pose_imgs_extended_padded_bboxes = [], []
         for k in range(len(bboxes_batch)):
             # for each element of the batch
-            preprocessed_images, extended_padded_bboxes = crop_resize_and_normalize(images_batch[k], bboxes_batch[k], sam2_masks_batch[k], (sapiens_original_input_shape[1], sapiens_original_input_shape[2]), 
-                                                                                    [123.5, 116.5, 103.5], [58.5, 57.0, 57.5],
-                                                                                    draw_boxes=False, show_bboxes=False)
+            preprocessed_images, extended_padded_bboxes = crop_resize_and_normalize_in_360_image(images_batch[k], bboxes_batch[k], sam2_masks_batch[k], (sapiens_original_input_shape[1], sapiens_original_input_shape[2]), 
+                                                                                                [123.5, 116.5, 103.5], [58.5, 57.0, 57.5],
+                                                                                                draw_boxes=False, show_bboxes=False)
             
             
             pose_imgs.extend(preprocessed_images)
@@ -373,6 +455,11 @@ def main(args, ep, pose_estimator):
                 
                 keypoints = (keypoints / (sapiens_original_input_shape[2], sapiens_original_input_shape[1])) * bbox_size + image_bbox[:2]
                 keypoints = keypoints[0] # shape (308, 2)
+                for kp_idx, kp in enumerate(keypoints):
+                    # if the keypoint is out of the image, wrap it around
+                    if kp[0] >= image.shape[1]:
+                        kp[0] = kp[0] - image.shape[1]
+                        
                 keypoint_scores = keypoint_scores[0] # shape (308)
                 if not img_result["has_dets"]:
                     keypoint_scores = keypoint_scores*0.0 # set the scores to 0 for the samples that have no detections

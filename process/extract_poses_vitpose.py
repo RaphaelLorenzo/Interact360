@@ -207,7 +207,8 @@ def process_episode(args, ep, image_processor, model, device):
                 images_xmins_centered_on_valid_detections_batch = images_xmins_centered_on_valid_detections[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]
                 valid_boxes_idxs_batch = valid_boxes_idxs[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]
                 
-                inputs = image_processor(images_centered_on_valid_detections_batch, boxes=person_boxes_batch, return_tensors="pt").to(device) # NOTE : this does not allow to put the masks on the images / Must be sure that the box contains only one person
+                inputs = image_processor(images_centered_on_valid_detections_batch, boxes=person_boxes_batch, return_tensors="pt").to(device) 
+                # NOTE : this does not allow to put the masks on the images. Must be sure that the box contains only one person, to add mask put it before on the centered images
 
                 with torch.no_grad():
                     outputs = model(**inputs)
