@@ -323,6 +323,7 @@ class Interact360Visualizer(QMainWindow):
         # Track data for plots
         self.track_engagement_data = {}  # track_id -> {'frames': [], 'engagement': []}
         self.track_mask_size_data = {}  # track_id -> {'frames': [], 'mask_size': []}
+        self.track_intersection_pixels_data = {}  # track_id -> {'frames': [], 'intersection_pixels': []}
         
         # Interaction mask
         self.interaction_mask = None
@@ -764,6 +765,14 @@ class Interact360Visualizer(QMainWindow):
         layout.addWidget(title_label)
         
         # Create plot widgets
+        self.intersection_pixels_plot = PlotWidget(
+            "Intersection Pixels", "Pixels", 
+            self.plot_window_past, self.plot_window_future, 
+            allow_values="nonnegative",
+            ylims=[0, 5000]
+        )
+        layout.addWidget(self.intersection_pixels_plot)
+        
         self.engagement_plot = PlotWidget(
             "Track Engagement", "Engagement Level", 
             self.plot_window_past, self.plot_window_future, 
@@ -841,6 +850,7 @@ class Interact360Visualizer(QMainWindow):
             self.detections = {}
             self.track_engagement_data = {}
             self.track_mask_size_data = {}
+            self.track_intersection_pixels_data = {}
             prWarning(f"No detection file found: {detection_file}")
         
         # Load interact zone tracking if available
@@ -908,6 +918,7 @@ class Interact360Visualizer(QMainWindow):
         """Extract engagement and mask size data for plots"""
         self.track_engagement_data = {}
         self.track_mask_size_data = {}
+        self.track_intersection_pixels_data = {}
         
         for i, detection_entry in enumerate(detections_list):
             if True:
@@ -923,6 +934,14 @@ class Interact360Visualizer(QMainWindow):
                             self.track_engagement_data[track_id] = {'frames': [], 'engagement': []}
                         self.track_engagement_data[track_id]['frames'].append(frame_index)
                         self.track_engagement_data[track_id]['engagement'].append(engagement_level)
+                    
+                    # Extract intersection pixels if available
+                    intersection_pixels = detection.get("intersection_pixels", -1)
+                    if intersection_pixels >= 0:  # Valid intersection pixels
+                        if track_id not in self.track_intersection_pixels_data:
+                            self.track_intersection_pixels_data[track_id] = {'frames': [], 'intersection_pixels': []}
+                        self.track_intersection_pixels_data[track_id]['frames'].append(frame_index)
+                        self.track_intersection_pixels_data[track_id]['intersection_pixels'].append(intersection_pixels)
                     
                     # Extract mask size if RLE is available
                     if "mask_rle" in detection:
@@ -1120,6 +1139,7 @@ class Interact360Visualizer(QMainWindow):
         for det in detections:
             track_id = det.get("track_id", -1)
             engagement_level = det.get("engagement_level", det.get("engagement_level_auto", -1))
+            intersection_pixels = det.get("intersection_pixels", -1)
             
             # Filter based on track validity if option is disabled
             if not self.show_invalid_tracks:
@@ -1181,7 +1201,7 @@ class Interact360Visualizer(QMainWindow):
 
             # Draw interaction highlights for engagement level 3 tracks
             if (self.show_interaction_highlights and 
-                engagement_level == 3 and 
+                (engagement_level == 3 or intersection_pixels > 0) and 
                 "mask_rle" in det and 
                 self.interaction_mask is not None):
                 mask_rle = [int(x) for x in det["mask_rle"].split(",")]
@@ -1355,8 +1375,14 @@ class Interact360Visualizer(QMainWindow):
     
     def update_plots(self):
         """Update both engagement and mask size plots"""
-        if not hasattr(self, 'engagement_plot') or not hasattr(self, 'mask_size_plot'):
+        if not hasattr(self, 'engagement_plot') or not hasattr(self, 'mask_size_plot') or not hasattr(self, 'intersection_pixels_plot'):
             return
+        
+        # Prepare intersection pixels data for current window
+        intersection_pixels_data = {}
+        for track_id, data in self.track_intersection_pixels_data.items():
+            frame_value_pairs = list(zip(data['frames'], data['intersection_pixels']))
+            intersection_pixels_data[track_id] = frame_value_pairs
         
         # Prepare engagement data for current window
         engagement_data = {}
@@ -1371,6 +1397,7 @@ class Interact360Visualizer(QMainWindow):
             mask_size_data[track_id] = frame_value_pairs
         
         # Update plots
+        self.intersection_pixels_plot.update_plot(self.current_frame, intersection_pixels_data)
         self.engagement_plot.update_plot(self.current_frame, engagement_data)
         self.mask_size_plot.update_plot(self.current_frame, mask_size_data)
     

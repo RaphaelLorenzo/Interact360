@@ -5,6 +5,7 @@ import datetime
 import numpy as np
 import cv2
 import torch
+import torch.multiprocessing as mp
 from tqdm import tqdm
 
 import warnings
@@ -17,7 +18,53 @@ from misc.print_utils import *
 from misc.other_utils import *
 from misc.rle_tools import decode_RLE
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def process_one_image_element(args, intersection_mask, detections, height, width, interaction_zone_tracking_rle):
+    if intersection_mask is None and len(detections) > 0:
+        # load once for the image
+        compared_mask_rle = np.array(interaction_zone_tracking_rle.split(",")).astype(np.int32)
+        compared_mask = decode_RLE(torch.from_numpy(compared_mask_rle), shape = (height, width))
+        
+    for det_idx, det in enumerate(detections):
+        mask_rle = np.array(det["mask_rle"].split(",")).astype(np.int32)
+        mask = decode_RLE(torch.from_numpy(mask_rle).to(DEVICE), shape = (width, height))
+        # cv2.imshow(f"Mask {det['track_id']}", cv2.resize((mask*255).cpu().numpy().astype(np.uint8), (960, 480)))
+        # key = cv2.waitKey(0)
+        # if key == ord('q') or key == 27:
+        #     exit()
+        if intersection_mask is not None:
+            intersection_sum = torch.sum(intersection_mask & mask)
+        else:
+            intersection_sum = torch.sum(compared_mask & mask)
+            
+        if intersection_sum > args.min_pixels_intersection:
+            det["engagement_level"] = 3
+        else:
+            det["engagement_level"] = 0
+        
+        det["intersection_pixels"] = intersection_sum.item()
+        
+    return detections
+
+def worker_process_image(args_tuple):
+    """Worker function for multiprocessing that processes a single image element"""
+    (image_idx, image_detections, intersection_mask, height, width, 
+     interaction_zone_tracking_rle, min_pixels_intersection) = args_tuple
+    
+    # Create a minimal args object for the worker
+    class WorkerArgs:
+        def __init__(self, min_pixels_intersection):
+            self.min_pixels_intersection = min_pixels_intersection
+    
+    worker_args = WorkerArgs(min_pixels_intersection)
+    
+    processed_detections = process_one_image_element(
+        worker_args, intersection_mask, image_detections["detections"], 
+        height, width, interaction_zone_tracking_rle
+    )
+    
+    return image_idx, processed_detections
 
 def main(args, episode: str):
     """ Main function to get the engagement levels for the tracks
@@ -38,7 +85,7 @@ def main(args, episode: str):
         intersection_mask = cv2.imread(args.intersection_mask_path)
         intersection_mask = cv2.cvtColor(intersection_mask, cv2.COLOR_BGR2GRAY)
         intersection_mask = np.array(intersection_mask>128)
-        intersection_mask = torch.from_numpy(intersection_mask) # Tensor of shape [H, W], dtype is torch.bool
+        intersection_mask = torch.from_numpy(intersection_mask).to(DEVICE) # Tensor of shape [H, W], dtype is torch.bool
     
     image_dir = os.path.join(args.dir, "episodes", episode, "images_360")
     image_files = os.listdir(image_dir)
@@ -58,27 +105,42 @@ def main(args, episode: str):
     write_dic_to_json_file(detections_dict, detections_path_save)
     prInfo(f"Saved detections copy to {detections_path_save}")
 
-    for image_idx, image_detections in tqdm(enumerate(detections_dict), total=len(detections_dict), desc="Processing detections"):
-        for det_idx, det in enumerate(image_detections["detections"]):
-            mask_rle = np.array(det["mask_rle"].split(",")).astype(np.int32)
-            mask = decode_RLE(torch.from_numpy(mask_rle), shape = (height, width))
-            if intersection_mask is not None:
-                intersection_sum = torch.sum(intersection_mask & mask)
-            else:
-                compared_mask_rle = np.array(interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"].split(",")).astype(np.int32)
-                compared_mask = decode_RLE(torch.from_numpy(compared_mask_rle), shape = (height, width))
-                intersection_sum = torch.sum(compared_mask & mask)
-                
-            if intersection_sum > args.min_pixels_intersection:
-                det["engagement_level"] = 3
-            else:
-                det["engagement_level"] = 0
+    # Prepare arguments for multiprocessing
+    process_args = []
+    for image_idx, image_detections in enumerate(detections_dict):
+        if interact_zone_tracking_dict is not None:
+            interaction_zone_tracking_rle = interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"]
+        else:
+            interaction_zone_tracking_rle = None
+            
+        process_args.append((
+            image_idx, image_detections, intersection_mask, height, width,
+            interaction_zone_tracking_rle, args.min_pixels_intersection
+        ))
+    
+    # Use torch multiprocessing to process images in parallel
+    num_processes = min(mp.cpu_count()//2, len(detections_dict))
+    prInfo(f"Using {num_processes} processes for parallel processing")
+    
+    with mp.Pool(processes=num_processes) as pool:
+        results = list(tqdm(
+            pool.imap(worker_process_image, process_args),
+            total=len(process_args),
+            desc="Processing detections"
+        ))
+    
+    # Update detections_dict with results
+    for image_idx, processed_detections in results:
+        detections_dict[image_idx]["detections"] = processed_detections
                 
     # write the detections dict to the file
     prInfo(f"Saving detections to {detections_path}")
     write_dic_to_json_file(detections_dict, detections_path)
 
 if __name__ == "__main__":
+    # Set multiprocessing start method for better compatibility
+    mp.set_start_method('spawn', force=True)
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360", help="Directory to use (default: %(default)s)")
     parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all' (default: %(default)s)")
