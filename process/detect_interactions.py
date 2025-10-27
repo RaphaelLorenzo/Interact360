@@ -23,8 +23,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def process_one_image_element(args, intersection_mask, detections, height, width, interaction_zone_tracking_rle):
     if intersection_mask is None and len(detections) > 0:
         # load once for the image
-        compared_mask_rle = np.array(interaction_zone_tracking_rle.split(",")).astype(np.int32)
-        compared_mask = decode_RLE(torch.from_numpy(compared_mask_rle), shape = (width, height))
+        compared_mask_rle = torch.from_numpy(np.array(interaction_zone_tracking_rle.split(",")).astype(np.int32)).to(DEVICE)
+        compared_mask = decode_RLE(compared_mask_rle, shape = (width, height))
         
     for det_idx, det in enumerate(detections):
         mask_rle = np.array(det["mask_rle"].split(",")).astype(np.int32)
