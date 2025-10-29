@@ -57,6 +57,8 @@ def main(args):
     
     if args.file_start_timestamp == "birthtime":
         file_start_timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(args.video_path)).timestamp()
+    elif args.file_start_timestamp == "zero":
+        file_start_timestamp = 0
     else:
         try:
             file_start_timestamp = datetime.datetime.strptime(args.file_start_timestamp, "%Y_%m_%d_%H_%M_%S_%f").timestamp()

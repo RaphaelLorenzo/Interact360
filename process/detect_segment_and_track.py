@@ -1304,6 +1304,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     # Transform the dict to a list
     sam2_detections_output_list = []
     for image_idx, image_detections in sam2_detections_output.items():
+        image_detections["image_file"] = os.path.basename(image_detections["image_file"])
         for det in image_detections["detections"]:
             mask_rle_list = det["mask_rle"].cpu().numpy().tolist()
             det["mask_rle"] = ",".join([str(int(x)) for x in mask_rle_list])
