@@ -31,6 +31,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", "-d", type=str, default="./demo/output/2025_06_13_11_15_31_Theta360", help="Directory to use (default: %(default)s)")
     parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all' (default: %(default)s)")
+    parser.add_argument("--no_check_same_file_timestamps", "-nc", action="store_true", help="Do not check if the timestamps are the same for the same file (default: %(default)s)")
     args = parser.parse_args()
 
     # List of episodes to process
@@ -76,9 +77,12 @@ if __name__ == "__main__":
             ts_from_image_file_from_interact_zone_tracking  = datetime.datetime.strptime(image_file_from_interact_zone_tracking.split(".")[0], "%Y_%m_%d_%H_%M_%S_%f").timestamp()
             ts_from_image_file_from_detections  = datetime.datetime.strptime(image_file_from_detections.split(".")[0], "%Y_%m_%d_%H_%M_%S_%f").timestamp()
             
-            assert(ts_from_image_file == ts_from_image_file_from_interact_zone_tracking), f"Timestamp from image file: {ts_from_image_file} vs timestamp from interact zone tracking: {ts_from_image_file_from_interact_zone_tracking}"
-            assert(ts_from_image_file == ts_from_image_file_from_detections), f"Timestamp from image file: {ts_from_image_file} vs timestamp from detections: {ts_from_image_file_from_detections}"
-            
+            if args.no_check_same_file_timestamps:
+                pass
+            else:
+                assert(ts_from_image_file == ts_from_image_file_from_interact_zone_tracking), f"Timestamp from image file: {ts_from_image_file} vs timestamp from interact zone tracking: {ts_from_image_file_from_interact_zone_tracking}"
+                assert(ts_from_image_file == ts_from_image_file_from_detections), f"Timestamp from image file: {ts_from_image_file} vs timestamp from detections: {ts_from_image_file_from_detections}"
+                
             new_ts = ts_from_image_file - first_ts
             new_ts_str = datetime.datetime.fromtimestamp(new_ts).strftime("%Y_%m_%d_%H_%M_%S_%f")
             
