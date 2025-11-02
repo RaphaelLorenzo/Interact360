@@ -1044,6 +1044,8 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
 
             # Load the full image
             image = Image.open(image_file)
+            original_image_width = image.width
+            original_image_height = image.height
             image = np.array(image) # [H, W, 3] with usually H = 1920, H = 3840 for 360 images
                         
             # ... and over each YOLO detection in the image ...
