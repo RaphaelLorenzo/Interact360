@@ -244,7 +244,18 @@ def load_model(checkpoint, use_torchscript=False):
         return torch.jit.load(checkpoint)
     else:
         return torch.export.load(checkpoint).module()
-    
+
+
+def process_single_image_for_preprocessing(args_tuple):
+    """Worker function to process a single image for parallel preprocessing."""
+    k, image, bboxes, sam2_masks, input_shape, mean, std = args_tuple
+    preprocessed_images, extended_padded_bboxes = crop_resize_and_normalize_in_360_image(
+        image, bboxes, sam2_masks, input_shape, mean, std,
+        draw_boxes=False, show_bboxes=False
+    )
+    return preprocessed_images, extended_padded_bboxes
+
+
 def main(args, ep, pose_estimator):
 
     sapiens_original_input_shape = (3, 1024, 768) # C, H, W
@@ -363,13 +374,25 @@ def main(args, ep, pose_estimator):
         
         ### Preprocess the images for the inference ###
         pose_imgs, pose_imgs_extended_padded_bboxes = [], []
-        for k in range(len(bboxes_batch)):
-            # for each element of the batch
-            preprocessed_images, extended_padded_bboxes = crop_resize_and_normalize_in_360_image(images_batch[k], bboxes_batch[k], sam2_masks_batch[k], (sapiens_original_input_shape[1], sapiens_original_input_shape[2]), 
-                                                                                                [123.5, 116.5, 103.5], [58.5, 57.0, 57.5],
-                                                                                                draw_boxes=False, show_bboxes=False)
-            
-            
+        
+        # Parallelize the preprocessing loop using half of available CPUs
+        # Prepare arguments for parallel processing
+        num_workers = max(1, cpu_count() // 2)
+        input_shape = (sapiens_original_input_shape[1], sapiens_original_input_shape[2])
+        mean = [123.5, 116.5, 103.5]
+        std = [58.5, 57.0, 57.5]
+        
+        process_args = [
+            (k, images_batch[k], bboxes_batch[k], sam2_masks_batch[k], input_shape, mean, std)
+            for k in range(len(bboxes_batch))
+        ]
+        
+        # Process in parallel
+        with Pool(processes=num_workers) as pool:
+            results = pool.map(process_single_image_for_preprocessing, process_args)
+        
+        # Collect results
+        for preprocessed_images, extended_padded_bboxes in results:
             pose_imgs.extend(preprocessed_images)
             pose_imgs_extended_padded_bboxes.extend(extended_padded_bboxes)
         
