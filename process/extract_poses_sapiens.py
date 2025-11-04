@@ -35,7 +35,7 @@ from sapiens_liter.liter.utils.pose_utils import nms, top_down_affine_transform,
 
 from tqdm import tqdm
 
-from ultralytics import YOLO
+# from ultralytics import YOLO
 
 from torchvision.transforms.functional import crop
 from torchvision.transforms.functional import resize
