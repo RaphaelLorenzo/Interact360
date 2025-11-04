@@ -119,7 +119,8 @@ def main(args, episode: str):
         ))
     
     # Use torch multiprocessing to process images in parallel
-    num_processes = min(mp.cpu_count()//2, len(detections_dict))
+    num_processes = min(mp.cpu_count()//2, len(detections_dict)) if args.workers == 0 else args.workers
+    num_processes = min(num_processes, len(process_args))
     prInfo(f"Using {num_processes} processes for parallel processing")
     
     with mp.Pool(processes=num_processes) as pool:
@@ -146,6 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", "-e", type=str, default="all", help="Episodes to use, separated by commas or 'all' (default: %(default)s)")
     parser.add_argument("--intersection_mask_path", "-imp", type=str, default="./assets/default_mask_intersection_zone.png", help="Intersection mask path (default: %(default)s)")
     parser.add_argument("--min_pixels_intersection", "-mpi", type=int, default=10000, help="Minimum pixels intersection to consider a detection as interacting (default: %(default)s)")
+    parser.add_argument("--workers", "-w", type=int, default=0, help="Number of workers to use for parallel processing. Default: 0 (use half of available cores) (default: %(default)s)")
     args = parser.parse_args()
     
     assert os.path.isdir(args.dir), "Directory should exist at {}".format(args.dir)
