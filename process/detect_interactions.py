@@ -109,7 +109,10 @@ def main(args, episode: str):
     process_args = []
     for image_idx, image_detections in enumerate(detections_dict):
         if interact_zone_tracking_dict is not None:
-            interaction_zone_tracking_rle = interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"]
+            if len(interact_zone_tracking_dict[image_idx]["detections"]) > 0:
+                interaction_zone_tracking_rle = interact_zone_tracking_dict[image_idx]["detections"][0]["mask_rle"]
+            else:
+                interaction_zone_tracking_rle = None
         else:
             interaction_zone_tracking_rle = None
             
