@@ -351,6 +351,7 @@ class Interact360Visualizer(QMainWindow):
         self.edit_mode = False
         self.edited_detections = {}  # Store local modifications
         self.next_available_id = 0  # Next available track ID for splitting
+        self.current_episodes_flags_path = None  # Path to episodes_flag.json for current episode
         
         # Plot time windows
         self.plot_window_past = 50
@@ -708,6 +709,26 @@ class Interact360Visualizer(QMainWindow):
         
         track_edit_layout.addWidget(operations_group)
         
+        # Episode flag updates
+        flags_group = QGroupBox("Update Episode Flag")
+        flags_layout = QVBoxLayout(flags_group)
+        
+        flags_buttons_layout = QHBoxLayout()
+        self.append_checked_btn = QPushButton("Append ,checked [C]")
+        self.append_checked_btn.clicked.connect(self.append_checked_flag)
+        flags_buttons_layout.addWidget(self.append_checked_btn)
+        
+        self.set_invalid_flag_btn = QPushButton("Set Invalid")
+        self.set_invalid_flag_btn.clicked.connect(self.set_invalid_flag)
+        flags_buttons_layout.addWidget(self.set_invalid_flag_btn)
+        
+        self.set_valid_flag_btn = QPushButton("Set Valid")
+        self.set_valid_flag_btn.clicked.connect(self.set_valid_flag)
+        flags_buttons_layout.addWidget(self.set_valid_flag_btn)
+        
+        flags_layout.addLayout(flags_buttons_layout)
+        track_edit_layout.addWidget(flags_group)
+        
         # Save changes
         save_layout = QHBoxLayout()
         self.save_changes_btn = QPushButton("Save Changes [Ctrl+S]")
@@ -848,6 +869,7 @@ class Interact360Visualizer(QMainWindow):
         QShortcut(QKeySequence("E"), self, lambda: self.edit_mode_cb.setChecked(not self.edit_mode_cb.isChecked()))
         QShortcut(QKeySequence("Ctrl+S"), self, self.save_changes)
         QShortcut(QKeySequence("Ctrl+D"), self, self.discard_changes)
+        QShortcut(QKeySequence("C"), self, self.append_checked_flag)
         
         # Track selection
         QShortcut(QKeySequence("Escape"), self, self.clear_track_selection)
@@ -867,6 +889,9 @@ class Interact360Visualizer(QMainWindow):
             
         session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
         episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
+        
+        # Store the episodes flags path for this episode
+        self.current_episodes_flags_path = os.path.join(self.args.directory, session, "episodes_flag.json")
         
         prInfo(f"Loading episode: {session}/{episode} | {associated_episodes_flags_dict[episode]['flag']}")
         
@@ -1806,6 +1831,67 @@ class Interact360Visualizer(QMainWindow):
         self.update_image_display()
         self.update_track_list()
         self.statusBar().showMessage("Changes discarded")
+    
+    def update_episode_flag(self, new_flag):
+        """Update the episode flag and save to file"""
+        if not self.edit_mode:
+            QMessageBox.warning(self, "Edit Mode Required", "Please enable edit mode first.")
+            return False
+        
+        if self.current_episodes_flags_path is None:
+            QMessageBox.warning(self, "Error", "No episodes flags path available.")
+            return False
+        
+        try:
+            # Get current episode info
+            session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
+            
+            # Update the flag in the dictionary
+            if episode in associated_episodes_flags_dict:
+                associated_episodes_flags_dict[episode]["flag"] = new_flag
+            else:
+                QMessageBox.warning(self, "Error", f"Episode {episode} not found in flags dictionary.")
+                return False
+            
+            # Save to file
+            write_dic_to_json_file(associated_episodes_flags_dict, self.current_episodes_flags_path)
+            
+            # Update the episode combo box text
+            episode_flag = associated_episodes_flags_dict[episode]["flag"]
+            item_text = f"{session} | Ep. {episode} | {episode_flag}"
+            self.episode_combo.setItemText(self.current_episode_idx, item_text)
+            
+            self.statusBar().showMessage(f"Episode flag updated to: {new_flag}")
+            prInfo(f"Updated episode {session}/{episode} flag to: {new_flag}")
+            return True
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to update episode flag: {str(e)}")
+            return False
+    
+    def append_checked_flag(self):
+        """Append ',checked' to the current episode flag"""
+        if not self.edit_mode:
+            QMessageBox.warning(self, "Edit Mode Required", "Please enable edit mode first.")
+            return
+        
+        session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
+        current_flag = associated_episodes_flags_dict[episode]["flag"]
+        
+        # Append ",checked" if not already present
+        if ",checked" not in current_flag:
+            new_flag = current_flag + ",checked"
+            self.update_episode_flag(new_flag)
+        else:
+            self.statusBar().showMessage("Flag already contains ',checked'")
+    
+    def set_invalid_flag(self):
+        """Set episode flag to 'invalid'"""
+        self.update_episode_flag("invalid")
+    
+    def set_valid_flag(self):
+        """Set episode flag to 'valid'"""
+        self.update_episode_flag("valid")
     
     def save_detections_to_file(self):
         """Save current detections to JSON file"""
