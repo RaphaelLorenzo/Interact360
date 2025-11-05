@@ -235,7 +235,7 @@ class PlotWidget(QWidget):
 class ImageDisplayWidget(QLabel):
     """Custom widget for displaying 360° images"""
     
-    def __init__(self):
+    def __init__(self, visualizer=None):
         super().__init__()
         self.setMinimumSize(800, 400)
         self.setScaledContents(False)
@@ -244,6 +244,7 @@ class ImageDisplayWidget(QLabel):
         self.scale_factor = (1.0, 1.0)
         self.image_size = (0, 0)
         self.original_pixmap = None
+        self.visualizer = visualizer  # Reference to parent visualizer
         
     def set_image_with_scale(self, image_array):
         """Set image and store scale factor for coordinate conversion"""
@@ -286,6 +287,52 @@ class ImageDisplayWidget(QLabel):
         scale_x = self.image_size[0] / widget_size.width()
         scale_y = self.image_size[1] / widget_size.height()
         self.scale_factor = (scale_x, scale_y)
+    
+    def widget_to_image_coords(self, widget_x, widget_y):
+        """Convert widget coordinates to image coordinates"""
+        if self.image_size[0] == 0 or self.image_size[1] == 0:
+            return None, None
+        
+        # Get the pixmap size (which is scaled to fit widget)
+        pixmap = self.pixmap()
+        if pixmap is None or pixmap.isNull():
+            return None, None
+        
+        pixmap_size = pixmap.size()
+        widget_size = self.size()
+        
+        # Calculate the actual displayed pixmap position (centered)
+        pixmap_x_offset = (widget_size.width() - pixmap_size.width()) // 2
+        pixmap_y_offset = (widget_size.height() - pixmap_size.height()) // 2
+        
+        # Convert widget coordinates to pixmap coordinates
+        pixmap_x = widget_x - pixmap_x_offset
+        pixmap_y = widget_y - pixmap_y_offset
+        
+        # Check if click is within pixmap bounds
+        if pixmap_x < 0 or pixmap_x >= pixmap_size.width() or pixmap_y < 0 or pixmap_y >= pixmap_size.height():
+            return None, None
+        
+        # Convert pixmap coordinates to image coordinates
+        image_x = int(pixmap_x * self.image_size[0] / pixmap_size.width())
+        image_y = int(pixmap_y * self.image_size[1] / pixmap_size.height())
+        
+        return image_x, image_y
+    
+    def mousePressEvent(self, event):
+        """Handle mouse clicks on the image"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.visualizer and self.visualizer.edit_mode:
+                widget_x = event.position().x()
+                widget_y = event.position().y()
+                
+                image_x, image_y = self.widget_to_image_coords(widget_x, widget_y)
+                if image_x is not None and image_y is not None:
+                    # Check if Ctrl key is pressed for multi-selection
+                    ctrl_pressed = event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                    self.visualizer.select_track_by_click(image_x, image_y, ctrl_pressed)
+        
+        super().mousePressEvent(event)
     
     def resizeEvent(self, event):
         """Handle widget resize to update scale factors and rescale image"""
@@ -779,7 +826,7 @@ class Interact360Visualizer(QMainWindow):
         layout.addWidget(title_label)
         
         # Image display
-        self.image_widget = ImageDisplayWidget()
+        self.image_widget = ImageDisplayWidget(self)
         layout.addWidget(self.image_widget, 4)
         
         # Info label
@@ -1214,7 +1261,7 @@ class Interact360Visualizer(QMainWindow):
             # Draw bounding box if enabled
             if self.show_boxes:
                 thickness = 2
-                if (self.selected_track is not None and self.selected_track == track_id):
+                if self.is_track_selected(track_id):
                     thickness = 4  # Thicker for selected track
                     
                 xmin, ymin, xmax, ymax = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
@@ -1287,7 +1334,7 @@ class Interact360Visualizer(QMainWindow):
                         cv2.drawContours(image_copy, contours, -1, highlight_color, 3)
 
             # Draw thick contour if this track is selected
-            if (self.selected_track is not None and self.selected_track == track_id):
+            if self.is_track_selected(track_id):
                 if self.show_masks and "mask_rle" in det:
                     # Use mask contour for selected track
                     mask_rle = [int(x) for x in det["mask_rle"].split(",")]
@@ -1423,16 +1470,146 @@ class Interact360Visualizer(QMainWindow):
     
     def on_track_selected(self, item):
         """Handle track selection from the list"""
-        track_id = item.data(Qt.ItemDataRole.UserRole)
-        if track_id is not None:
-            self.selected_track = track_id
-            self.update_image_display()
+        # When using list widget selection, clear single selection
+        # The list widget handles multi-selection automatically
+        self.selected_track = None
+        self.update_image_display()
     
     def clear_track_selection(self):
         """Clear the current track selection"""
         self.selected_track = None
         self.track_list.clearSelection()
         self.update_image_display()
+    
+    def select_track_by_click(self, image_x, image_y, ctrl_pressed=False):
+        """Select a track by clicking on it in the image
+        
+        Args:
+            image_x: X coordinate in image space
+            image_y: Y coordinate in image space
+            ctrl_pressed: If True, toggle track in multi-selection. If False, single select.
+        """
+        if not self.edit_mode:
+            return
+        
+        # Get current detections
+        if self.edit_mode and self.current_frame in self.edited_detections:
+            detections = self.edited_detections[self.current_frame]["detections"]
+        elif self.current_frame in self.detections:
+            detections = self.detections[self.current_frame]["detections"]
+        else:
+            return
+        
+        # Find detections whose bounding boxes contain the click point
+        matching_dets = []
+        for det in detections:
+            xmin, ymin, xmax, ymax = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
+            
+            # Handle 360° wrapping - boxes can wrap around
+            if xmax > self.image_width:
+                # Box wraps around - check if click is in either part
+                if ((xmin <= image_x < self.image_width) or (0 <= image_x < xmax - self.image_width)) and ymin <= image_y < ymax:
+                    matching_dets.append(det)
+            else:
+                # Normal box
+                if xmin <= image_x < xmax and ymin <= image_y < ymax:
+                    matching_dets.append(det)
+        
+        if not matching_dets:
+            # No bounding box matches
+            if not ctrl_pressed:
+                # Clear selection only if not Ctrl+click (Ctrl+click on empty space should do nothing)
+                self.clear_track_selection()
+            return
+        
+        # If only one match, select it
+        if len(matching_dets) == 1:
+            track_id = matching_dets[0].get("track_id", -1)
+            if ctrl_pressed:
+                # Toggle track in list selection
+                self.toggle_track_in_list_selection(track_id)
+            else:
+                # Single select
+                self.selected_track = track_id
+                self.update_track_selection_in_list()
+            self.update_image_display()
+            return
+        
+        # Multiple boxes match - check masks
+        mask_matching_dets = []
+        for det in matching_dets:
+            if "mask_rle" in det:
+                try:
+                    # Decode mask
+                    mask_rle = [int(x) for x in det["mask_rle"].split(",")]
+                    mask_rle = torch.tensor(mask_rle, dtype=torch.int32).to(MASK_RLE_DEVICE)
+                    mask = decode_RLE(mask_rle, (self.image_height, self.image_width))
+                    mask_np = mask.cpu().numpy().astype(bool)
+                    
+                    # Check if click point is in mask
+                    # Masks are stored in image coordinates (0 to image_width), so check directly
+                    if 0 <= image_y < mask_np.shape[0] and 0 <= image_x < mask_np.shape[1]:
+                        if mask_np[image_y, image_x]:
+                            mask_matching_dets.append(det)
+                except Exception as e:
+                    prWarning(f"Error decoding mask for track selection: {e}")
+                    # If mask decode fails, include it anyway (fallback to box)
+                    mask_matching_dets.append(det)
+            else:
+                # No mask available, use bounding box as fallback
+                mask_matching_dets.append(det)
+        
+        # Select the first matching track (or first box match if no mask matches)
+        if mask_matching_dets:
+            selected_det = mask_matching_dets[0]
+        else:
+            selected_det = matching_dets[0]
+        
+        track_id = selected_det.get("track_id", -1)
+        if ctrl_pressed:
+            # Toggle track in list selection
+            self.toggle_track_in_list_selection(track_id)
+        else:
+            # Single select
+            self.selected_track = track_id
+            self.update_track_selection_in_list()
+        self.update_image_display()
+    
+    def toggle_track_in_list_selection(self, track_id):
+        """Toggle a track in the list widget's selection"""
+        # Find the item in the list
+        for i in range(self.track_list.count()):
+            item = self.track_list.item(i)
+            item_track_id = item.data(Qt.ItemDataRole.UserRole)
+            if item_track_id == track_id:
+                # Toggle selection
+                if item.isSelected():
+                    item.setSelected(False)
+                else:
+                    item.setSelected(True)
+                self.track_list.scrollToItem(item)
+                # Clear single selection if we're using multi-selection
+                self.selected_track = None
+                return
+    
+    def update_track_selection_in_list(self):
+        """Update the track list widget to reflect the selected track"""
+        if self.selected_track is None:
+            # If no single selection, keep current list selection
+            return
+        
+        # Clear current selection and select only the single track
+        self.track_list.clearSelection()
+        
+        # Find and select the item in the list
+        for i in range(self.track_list.count()):
+            item = self.track_list.item(i)
+            track_id = item.data(Qt.ItemDataRole.UserRole)
+            if track_id == self.selected_track:
+                item.setSelected(True)
+                self.track_list.setCurrentItem(item)
+                self.track_list.scrollToItem(item)
+                return
     
     def update_plots(self):
         """Update both engagement and mask size plots"""
@@ -1778,12 +1955,28 @@ class Interact360Visualizer(QMainWindow):
         self.update_image_display()
         self.update_track_list()
     
+    def is_track_selected(self, track_id):
+        """Check if a track is selected (either single selection or in list selection)"""
+        # Check single selection
+        if self.selected_track is not None and self.selected_track == track_id:
+            return True
+        # Check list selection
+        for item in self.track_list.selectedItems():
+            item_track_id = item.data(Qt.ItemDataRole.UserRole)
+            if item_track_id == track_id:
+                return True
+        return False
+    
     def get_selected_tracks(self):
         """Get list of selected track IDs"""
         selected_tracks = []
+        # Include single selection if set
+        if self.selected_track is not None:
+            selected_tracks.append(self.selected_track)
+        # Add tracks from list selection (avoid duplicates)
         for item in self.track_list.selectedItems():
             track_id = item.data(Qt.ItemDataRole.UserRole)
-            if track_id is not None:
+            if track_id is not None and track_id not in selected_tracks:
                 selected_tracks.append(track_id)
         return selected_tracks
     
