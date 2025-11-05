@@ -29,7 +29,8 @@ try:
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QSlider, QPushButton, QCheckBox, QListWidget, QLabel, QSplitter,
         QGroupBox, QGridLayout, QListWidgetItem, QMessageBox, QStatusBar,
-        QSpinBox, QTabWidget, QComboBox, QInputDialog, QAbstractItemView
+        QSpinBox, QTabWidget, QComboBox, QInputDialog, QAbstractItemView,
+        QDialog, QDialogButtonBox, QRadioButton, QButtonGroup
     )
     from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
     from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont, QKeySequence, QShortcut
@@ -351,6 +352,183 @@ class ImageDisplayWidget(QLabel):
                 self.blockSignals(False)
         
         self.update_scale_factors()
+
+
+class EngagementCorrectionDialog(QDialog):
+    """Dialog for correcting engagement levels of a track"""
+    
+    def __init__(self, parent, track_id, current_frame, num_frames, engagement_data):
+        """
+        Args:
+            parent: Parent window
+            track_id: Track ID to correct
+            current_frame: Current frame index
+            num_frames: Total number of frames
+            engagement_data: Dict with 'frames' and 'engagement' lists for the track
+        """
+        super().__init__(parent)
+        self.track_id = track_id
+        self.current_frame = current_frame
+        self.num_frames = num_frames
+        self.engagement_data = engagement_data
+        self.new_engagement = 0
+        self.past_frames = 15
+        self.future_frames = 15
+        self.accepted_correction = False
+        
+        self.setWindowTitle(f"Engagement Correction - Track {track_id}")
+        self.setMinimumSize(800, 600)
+        
+        layout = QVBoxLayout(self)
+        
+        # Track info
+        info_label = QLabel(f"Track ID: {track_id} | Current Frame: {current_frame}")
+        info_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(info_label)
+        
+        # Engagement level selection
+        engagement_group = QGroupBox("New Engagement Level")
+        engagement_layout = QVBoxLayout(engagement_group)
+        
+        self.engagement_button_group = QButtonGroup(self)
+        self.not_engaged_radio = QRadioButton("0 - Not Engaged")
+        self.not_engaged_radio.setChecked(True)
+        self.engaged_radio = QRadioButton("3 - Engaged")
+        self.engagement_button_group.addButton(self.not_engaged_radio, 0)
+        self.engagement_button_group.addButton(self.engaged_radio, 3)
+        engagement_layout.addWidget(self.not_engaged_radio)
+        engagement_layout.addWidget(self.engaged_radio)
+        
+        layout.addWidget(engagement_group)
+        
+        # Frame range selection
+        frame_range_group = QGroupBox("Frame Range")
+        frame_range_layout = QGridLayout(frame_range_group)
+        
+        frame_range_layout.addWidget(QLabel("Past frames:"), 0, 0)
+        self.past_frames_spin = QSpinBox()
+        self.past_frames_spin.setRange(0, 1000)
+        self.past_frames_spin.setValue(15)
+        self.past_frames_spin.valueChanged.connect(self.update_preview)
+        frame_range_layout.addWidget(self.past_frames_spin, 0, 1)
+        
+        frame_range_layout.addWidget(QLabel("Future frames:"), 1, 0)
+        self.future_frames_spin = QSpinBox()
+        self.future_frames_spin.setRange(0, 1000)
+        self.future_frames_spin.setValue(15)
+        self.future_frames_spin.valueChanged.connect(self.update_preview)
+        frame_range_layout.addWidget(self.future_frames_spin, 1, 1)
+        
+        layout.addWidget(frame_range_group)
+        
+        # Preview plot
+        plot_group = QGroupBox("Engagement History Preview")
+        plot_layout = QVBoxLayout(plot_group)
+        
+        if PYQTGRAPH_AVAILABLE:
+            self.preview_plot = PGPlotWidget(title="Engagement Level Over Time")
+            self.preview_plot.setLabel('left', 'Engagement Level')
+            self.preview_plot.setLabel('bottom', 'Frame')
+            self.preview_plot.showGrid(x=True, y=True, alpha=0.3)
+            self.preview_plot.setBackground('w')
+            self.preview_plot.setYRange(-0.5, 3.5, padding=0)
+            plot_layout.addWidget(self.preview_plot)
+        else:
+            plot_placeholder = QLabel("Plot preview not available (PyQtGraph required)")
+            plot_layout.addWidget(plot_placeholder)
+            self.preview_plot = None
+        
+        layout.addWidget(plot_group)
+        
+        # Connect radio buttons
+        self.not_engaged_radio.toggled.connect(self.update_preview)
+        self.engaged_radio.toggled.connect(self.update_preview)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept_correction)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # Initial preview update
+        self.update_preview()
+    
+    def update_preview(self):
+        """Update the preview plot with current and corrected engagement levels"""
+        if not PYQTGRAPH_AVAILABLE or self.preview_plot is None:
+            return
+        
+        # Get selected engagement level
+        if self.engaged_radio.isChecked():
+            new_engagement = 3
+        else:
+            new_engagement = 0
+        
+        # Get frame range
+        past_frames = self.past_frames_spin.value()
+        future_frames = self.future_frames_spin.value()
+        
+        # Clear previous plot
+        self.preview_plot.clear()
+        
+        # Get original engagement data
+        orig_frames = self.engagement_data.get('frames', [])
+        orig_engagement = self.engagement_data.get('engagement', [])
+        
+        # Calculate frame range for correction
+        frame_start = max(0, self.current_frame - past_frames)
+        frame_end = min(self.num_frames - 1, self.current_frame + future_frames)
+        
+        # Plot original engagement
+        if orig_frames and orig_engagement:
+            self.preview_plot.plot(
+                orig_frames, orig_engagement,
+                pen=pg.mkPen(color='blue', width=2),
+                symbol='o', symbolSize=4,
+                name='Original'
+            )
+        
+        # Plot corrected engagement for the range
+        corrected_frames = []
+        corrected_engagement = []
+        for frame in range(frame_start, frame_end + 1):
+            corrected_frames.append(frame)
+            corrected_engagement.append(new_engagement)
+        
+        if corrected_frames:
+            self.preview_plot.plot(
+                corrected_frames, corrected_engagement,
+                pen=pg.mkPen(color='red', width=5, style=pg.QtCore.Qt.PenStyle.DashLine),
+                symbol='x', symbolSize=12,
+                name='Corrected'
+            )
+        
+        # Add vertical line at current frame
+        self.preview_plot.addLine(
+            x=self.current_frame,
+            pen=pg.mkPen(color='green', width=2, style=pg.QtCore.Qt.PenStyle.DashLine),
+            label='Current Frame'
+        )
+        
+        # Set X range to show relevant frames
+        if orig_frames or corrected_frames:
+            all_frames = list(set(orig_frames + corrected_frames))
+            if all_frames:
+                x_min = max(0, min(all_frames) - 10)
+                x_max = min(self.num_frames - 1, max(all_frames) + 10)
+                self.preview_plot.setXRange(x_min, x_max, padding=0.1)
+    
+    def accept_correction(self):
+        """Accept the correction and store the values"""
+        if self.engaged_radio.isChecked():
+            self.new_engagement = 3
+        else:
+            self.new_engagement = 0
+        
+        self.past_frames = self.past_frames_spin.value()
+        self.future_frames = self.future_frames_spin.value()
+        self.accepted_correction = True
+        self.accept()
 
 
 class Interact360Visualizer(QMainWindow):
@@ -750,11 +928,21 @@ class Interact360Visualizer(QMainWindow):
         self.split_track_btn.clicked.connect(self.split_track)
         operations_layout.addWidget(self.split_track_btn)
         
-        self.merge_tracks_btn = QPushButton("Merge Selected Tracks [M]")
+        self.merge_tracks_btn = QPushButton("Merge Selected Tracks")
         self.merge_tracks_btn.clicked.connect(self.merge_tracks)
         operations_layout.addWidget(self.merge_tracks_btn)
         
         track_edit_layout.addWidget(operations_group)
+        
+        # Engagement correction
+        engagement_group = QGroupBox("Engagement Correction")
+        engagement_layout = QVBoxLayout(engagement_group)
+        
+        self.engagement_correction_btn = QPushButton("Engagement Correction [E]")
+        self.engagement_correction_btn.clicked.connect(self.open_engagement_correction_dialog)
+        engagement_layout.addWidget(self.engagement_correction_btn)
+        
+        track_edit_layout.addWidget(engagement_group)
         
         # Episode flag updates
         flags_group = QGroupBox("Update Episode Flag")
@@ -913,7 +1101,9 @@ class Interact360Visualizer(QMainWindow):
         QShortcut(QKeySequence("V"), self, lambda: self.show_invalid_tracks_cb.setChecked(not self.show_invalid_tracks_cb.isChecked()))
         
         # Edit mode shortcuts
-        QShortcut(QKeySequence("E"), self, lambda: self.edit_mode_cb.setChecked(not self.edit_mode_cb.isChecked()))
+        # E key: if edit mode is active and a track is selected, do engagement correction; otherwise toggle edit mode
+        self.e_shortcut = QShortcut(QKeySequence("E"), self)
+        self.e_shortcut.activated.connect(self.handle_e_key)
         QShortcut(QKeySequence("Ctrl+S"), self, self.save_changes)
         QShortcut(QKeySequence("Ctrl+D"), self, self.discard_changes)
         QShortcut(QKeySequence("C"), self, self.append_checked_flag)
@@ -1937,6 +2127,14 @@ class Interact360Visualizer(QMainWindow):
                 merged_det["track_id"] = new_track_id
                 merged_det["mask_rle"] = merged_mask_rle_str
                 merged_det["mask_size"] = merged_mask_size
+                
+                engagemement_level_biggest_det = biggest_det["engagement_level"] if "engagement_level" in biggest_det else 0
+                engagemement_level_smallest_det = smallest_det["engagement_level"] if "engagement_level" in smallest_det else 0
+                engagemement_level_auto_biggest_det = biggest_det["engagement_level_auto"] if "engagement_level_auto" in biggest_det else 0
+                engagemement_level_auto_smallest_det = smallest_det["engagement_level_auto"] if "engagement_level_auto" in smallest_det else 0
+                
+                merged_det["engagement_level"] = max(engagemement_level_biggest_det, engagemement_level_smallest_det)
+                merged_det["engagement_level_auto"] = max(engagemement_level_auto_biggest_det, engagemement_level_auto_smallest_det)
                 merged_det["xmin"] = min(biggest_det["xmin"], smallest_det["xmin"])
                 merged_det["ymin"] = min(biggest_det["ymin"], smallest_det["ymin"])
                 merged_det["xmax"] = max(biggest_det["xmax"], smallest_det["xmax"])
@@ -1951,9 +2149,227 @@ class Interact360Visualizer(QMainWindow):
             else:
                 # do nothing we have 0 tracks to merge
                 pass
+        
+        # Merge engagement data from both tracks
+        self.merge_track_engagement_data(selected_tracks, new_track_id)
+        
         self.statusBar().showMessage(f"Merged tracks {selected_tracks} into track {new_track_id}")
         self.update_image_display()
         self.update_track_list()
+        self.update_plots()
+    
+    def merge_track_engagement_data(self, old_track_ids, new_track_id):
+        """Merge engagement data from multiple tracks into a new merged track"""
+        # Collect all engagement data from the tracks to merge
+        merged_frames_eng = {}  # frame -> engagement_level
+        
+        for track_id in old_track_ids:
+            if track_id in self.track_engagement_data:
+                frames = self.track_engagement_data[track_id]['frames']
+                engagement = self.track_engagement_data[track_id]['engagement']
+                
+                for frame, eng_level in zip(frames, engagement):
+                    # If frame already exists, take the maximum engagement level
+                    if frame in merged_frames_eng:
+                        merged_frames_eng[frame] = max(merged_frames_eng[frame], eng_level)
+                    else:
+                        merged_frames_eng[frame] = eng_level
+        
+        # Create new engagement data for the merged track
+        if merged_frames_eng:
+            # Sort by frame number
+            sorted_frames = sorted(merged_frames_eng.keys())
+            sorted_engagement = [merged_frames_eng[frame] for frame in sorted_frames]
+            
+            self.track_engagement_data[new_track_id] = {
+                'frames': sorted_frames,
+                'engagement': sorted_engagement
+            }
+        
+        # Also merge mask size data
+        merged_frames_mask = {}  # frame -> mask_size
+        
+        for track_id in old_track_ids:
+            if track_id in self.track_mask_size_data:
+                frames = self.track_mask_size_data[track_id]['frames']
+                mask_sizes = self.track_mask_size_data[track_id]['mask_size']
+                
+                for frame, mask_size in zip(frames, mask_sizes):
+                    # If frame already exists, take the maximum mask size
+                    if frame in merged_frames_mask:
+                        merged_frames_mask[frame] = max(merged_frames_mask[frame], mask_size)
+                    else:
+                        merged_frames_mask[frame] = mask_size
+        
+        if merged_frames_mask:
+            sorted_frames_mask = sorted(merged_frames_mask.keys())
+            sorted_mask_sizes = [merged_frames_mask[frame] for frame in sorted_frames_mask]
+            
+            self.track_mask_size_data[new_track_id] = {
+                'frames': sorted_frames_mask,
+                'mask_size': sorted_mask_sizes
+            }
+        
+        # Also merge intersection pixels data
+        merged_frames_intersection = {}  # frame -> intersection_pixels
+        
+        for track_id in old_track_ids:
+            if track_id in self.track_intersection_pixels_data:
+                frames = self.track_intersection_pixels_data[track_id]['frames']
+                intersection_pixels = self.track_intersection_pixels_data[track_id]['intersection_pixels']
+                
+                for frame, pixels in zip(frames, intersection_pixels):
+                    # If frame already exists, take the maximum intersection pixels
+                    if frame in merged_frames_intersection:
+                        merged_frames_intersection[frame] = max(merged_frames_intersection[frame], pixels)
+                    else:
+                        merged_frames_intersection[frame] = pixels
+        
+        if merged_frames_intersection:
+            sorted_frames_intersection = sorted(merged_frames_intersection.keys())
+            sorted_intersection_pixels = [merged_frames_intersection[frame] for frame in sorted_frames_intersection]
+            
+            self.track_intersection_pixels_data[new_track_id] = {
+                'frames': sorted_frames_intersection,
+                'intersection_pixels': sorted_intersection_pixels
+            }
+        
+        # Remove old track data
+        for track_id in old_track_ids:
+            if track_id in self.track_engagement_data:
+                del self.track_engagement_data[track_id]
+            if track_id in self.track_mask_size_data:
+                del self.track_mask_size_data[track_id]
+            if track_id in self.track_intersection_pixels_data:
+                del self.track_intersection_pixels_data[track_id]
+    
+    def handle_e_key(self):
+        """Handle E key press: engagement correction if in edit mode with track selected, else toggle edit mode"""
+        if self.edit_mode:
+            # Check if exactly one track is selected
+            selected_tracks = self.get_selected_tracks()
+            if len(selected_tracks) == 1:
+                # Open engagement correction dialog
+                self.open_engagement_correction_dialog()
+            else:
+                # No track or multiple tracks selected, just toggle edit mode
+                self.edit_mode_cb.setChecked(not self.edit_mode_cb.isChecked())
+        else:
+            # Not in edit mode, toggle edit mode
+            self.edit_mode_cb.setChecked(not self.edit_mode_cb.isChecked())
+    
+    def open_engagement_correction_dialog(self):
+        """Open dialog for correcting engagement levels"""
+        if not self.edit_mode:
+            QMessageBox.warning(self, "Edit Mode Required", "Please enable edit mode first.")
+            return
+        
+        # Check that exactly one track is selected
+        selected_tracks = self.get_selected_tracks()
+        if len(selected_tracks) != 1:
+            QMessageBox.warning(self, "Invalid Selection", "Please select exactly one track to correct engagement level.")
+            return
+        
+        track_id = selected_tracks[0]
+        
+        # Get engagement data for this track
+        engagement_data = self.track_engagement_data.get(track_id, {'frames': [], 'engagement': []})
+        
+        # Create and show dialog
+        dialog = EngagementCorrectionDialog(
+            self,
+            track_id,
+            self.current_frame,
+            len(self.image_files),
+            engagement_data
+        )
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.accepted_correction:
+            # Apply the correction
+            self.apply_engagement_correction(
+                track_id,
+                dialog.new_engagement,
+                dialog.past_frames,
+                dialog.future_frames
+            )
+    
+    def apply_engagement_correction(self, track_id, new_engagement, past_frames, future_frames):
+        """Apply engagement level correction to the specified track and frame range"""
+        # Calculate frame range
+        frame_start = max(0, self.current_frame - past_frames)
+        frame_end = min(len(self.image_files) - 1, self.current_frame + future_frames)
+        
+        # Initialize edited detections if needed
+        if not self.edited_detections:
+            self.initialize_edited_detections()
+        
+        # Apply correction to all frames in range
+        frames_modified = 0
+        for frame_idx in range(frame_start, frame_end + 1):
+            if frame_idx in self.edited_detections:
+                for det in self.edited_detections[frame_idx].get("detections", []):
+                    if det.get("track_id", -1) == track_id:
+                        # Update engagement level
+                        det["engagement_level"] = new_engagement
+                        # Also update engagement_level_auto if it exists
+                        if "engagement_level_auto" in det:
+                            det["engagement_level_auto"] = new_engagement
+                        frames_modified += 1
+        
+        # Update engagement plot data
+        # Initialize if needed
+        if track_id not in self.track_engagement_data:
+            self.track_engagement_data[track_id] = {'frames': [], 'engagement': []}
+        
+        # Update the engagement data for this track
+        orig_frames = self.track_engagement_data[track_id]['frames']
+        orig_engagement = self.track_engagement_data[track_id]['engagement']
+        
+        # Create a set of frames that already have engagement data
+        existing_frames = set(orig_frames)
+        
+        # Create updated lists
+        updated_frames = []
+        updated_engagement = []
+        
+        # Process existing frames
+        for frame, engagement in zip(orig_frames, orig_engagement):
+            if frame_start <= frame <= frame_end:
+                # Use new engagement level
+                updated_frames.append(frame)
+                updated_engagement.append(new_engagement)
+            else:
+                # Keep original
+                updated_frames.append(frame)
+                updated_engagement.append(engagement)
+        
+        # Add engagement data for frames in range that don't have it yet but have the track
+        for frame_idx in range(frame_start, frame_end + 1):
+            if frame_idx not in existing_frames:
+                # Check if this frame has the track
+                if frame_idx in self.edited_detections:
+                    for det in self.edited_detections[frame_idx].get("detections", []):
+                        if det.get("track_id", -1) == track_id:
+                            # Add new engagement data
+                            updated_frames.append(frame_idx)
+                            updated_engagement.append(new_engagement)
+                            break
+        
+        # Sort by frame number
+        sorted_pairs = sorted(zip(updated_frames, updated_engagement))
+        updated_frames = [f for f, e in sorted_pairs]
+        updated_engagement = [e for f, e in sorted_pairs]
+        
+        # Update the data
+        self.track_engagement_data[track_id]['frames'] = updated_frames
+        self.track_engagement_data[track_id]['engagement'] = updated_engagement
+        
+        self.statusBar().showMessage(f"Applied engagement correction to track {track_id}: {new_engagement} for frames {frame_start}-{frame_end} ({frames_modified} detections modified)")
+        prInfo(f"Engagement correction applied: Track {track_id}, Level {new_engagement}, Frames {frame_start}-{frame_end}")
+        
+        # Update display
+        self.update_image_display()
+        self.update_plots()
     
     def is_track_selected(self, track_id):
         """Check if a track is selected (either single selection or in list selection)"""
