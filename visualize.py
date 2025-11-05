@@ -377,6 +377,15 @@ class Interact360Visualizer(QMainWindow):
         
         self.init_ui()
         self.load_episode_data()
+        
+    def create_episodes_flags_file(self, episodes_flags_path, episodes_desc_path):
+        episodes_desc_dict = read_json_to_dic(episodes_desc_path) # list like : [{"session": "2022_09_21_astor_place_recycle", "episode": "0000", "start_time": 1756981182.0, "end_time": 1756981301.9999995}...]
+        episodes_flags_dict = {} # dict like {"0000": {"start_time": 1751876686, "end_time": 1751876704, "start_time_formatted": "2025-07-07 10:24:46", "end_time_formatted": "2025-07-07 10:25:04", "flag": "valid,checked"}...}
+        for episode_desc in episodes_desc_dict:
+            episodes_flags_dict[episode_desc["episode"]] = {"start_time": episode_desc["start_time"], "end_time": episode_desc["end_time"], "start_time_formatted": datetime.datetime.fromtimestamp(episode_desc["start_time"]).strftime("%Y-%m-%d %H:%M:%S"), "end_time_formatted": datetime.datetime.fromtimestamp(episode_desc["end_time"]).strftime("%Y-%m-%d %H:%M:%S"), "flag": "valid"}
+            
+        write_dic_to_json_file(episodes_flags_dict, episodes_flags_path)
+        prInfo(f"Created episodes flags file: {episodes_flags_path}")
     
     def find_episodes(self):
         """Find available episodes in the output directory"""
@@ -393,24 +402,50 @@ class Interact360Visualizer(QMainWindow):
         
         if self.args.recording_name == "":
             # Look for subdirectories that contain episodes
-            for item in os.listdir(self.args.directory):
-                item_path = os.path.join(self.args.directory, item)
-                if os.path.isdir(item_path):
-                    episodes_dir = os.path.join(item_path, "episodes")
+            for recording_name in os.listdir(self.args.directory):
+                recording_path = os.path.join(self.args.directory, recording_name)
+                if os.path.isdir(recording_path):
+                    episodes_dir = os.path.join(recording_path, "episodes")
+                    episodes_desc_path = os.path.join(recording_path, "episodes.json") # this one is mandatory
+                    assert os.path.exists(episodes_desc_path), f"Episodes description file does not exist: {episodes_desc_path}"
+                    episodes_flags_path = os.path.join(recording_path, "episodes_flag.json")
+                    if os.path.exists(episodes_flags_path):
+                        episodes_flags_dict = read_json_to_dic(episodes_flags_path)
+                        prInfo(f"Got episodes flags: {episodes_flags_dict}")
+                    else:
+                        # no file found create if from episodes description
+                        self.create_episodes_flags_file(episodes_flags_path, episodes_desc_path)
+                        prSuccess(f"Created episodes flags file: {episodes_flags_path}")
+                    
+                    associated_episodes_flags_dict = read_json_to_dic(episodes_flags_path)
+                        
                     if os.path.exists(episodes_dir):
                         # Find episode subdirectories (like 0000)
                         for ep in os.listdir(episodes_dir):
                             ep_path = os.path.join(episodes_dir, ep)
                             if os.path.isdir(ep_path) and ep.isdigit():
-                                episodes_list.append((item, ep))
+                                episodes_list.append((recording_name, ep, associated_episodes_flags_dict))
         else:
             episodes_dir = os.path.join(self.args.directory, self.args.recording_name, "episodes")
+            episodes_desc_path = os.path.join(self.args.directory, self.args.recording_name, "episodes.json") # this one is mandatory
+            assert os.path.exists(episodes_desc_path), f"Episodes description file does not exist: {episodes_desc_path}"
+            episodes_flags_path = os.path.join(self.args.directory, self.args.recording_name, "episodes_flag.json")
+            if os.path.exists(episodes_flags_path):
+                episodes_flags_dict = read_json_to_dic(episodes_flags_path)
+                prInfo(f"Got episodes flags: {episodes_flags_dict}")
+            else:
+                # no file found create if from episodes description
+                self.create_episodes_flags_file(episodes_flags_path, episodes_desc_path)
+                prSuccess(f"Created episodes flags file: {episodes_flags_path}")
+            
+            associated_episodes_flags_dict = read_json_to_dic(episodes_flags_path)
+            
             if os.path.exists(episodes_dir):
                 # Find episode subdirectories (like 0000)
                 for ep in os.listdir(episodes_dir):
                     ep_path = os.path.join(episodes_dir, ep)
                     if os.path.isdir(ep_path) and ep.isdigit():
-                        episodes_list.append((self.args.recording_name, ep))
+                        episodes_list.append((self.args.recording_name, ep, associated_episodes_flags_dict))
                         
         episodes_list.sort()
         prInfo(f"Found {len(episodes_list)} episodes: {episodes_list}")
@@ -472,7 +507,7 @@ class Interact360Visualizer(QMainWindow):
         
         # Left panel: Controls
         control_panel = self.create_control_panel()
-        control_panel.setMaximumWidth(300)
+        control_panel.setMaximumWidth(450)
         control_panel.setMinimumWidth(250)
         main_splitter.addWidget(control_panel)
         
@@ -487,7 +522,7 @@ class Interact360Visualizer(QMainWindow):
         main_splitter.addWidget(plots_section)
         
         # Set splitter proportions
-        main_splitter.setSizes([250, 800, 350])
+        main_splitter.setSizes([450, 600, 350])
         
         # Setup keyboard shortcuts
         self.setup_shortcuts()
@@ -503,8 +538,9 @@ class Interact360Visualizer(QMainWindow):
         
         # Episode dropdown
         self.episode_combo = QComboBox()
-        for i, (session, ep) in enumerate(self.episodes_list):
-            item_text = f"{session} | Ep. {ep}"
+        for i, (session, ep, associated_episodes_flags_dict) in enumerate(self.episodes_list):
+            episode_flag = associated_episodes_flags_dict[ep]["flag"]
+            item_text = f"{session} | Ep. {ep} | {episode_flag}"
             self.episode_combo.addItem(item_text)
         self.episode_combo.currentIndexChanged.connect(self.change_episode)
         episode_layout.addWidget(self.episode_combo)
@@ -829,10 +865,10 @@ class Interact360Visualizer(QMainWindow):
             prWarning("No episodes available")
             return
             
-        session, episode = self.episodes_list[self.current_episode_idx]
+        session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
         episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
         
-        prInfo(f"Loading episode: {session}/{episode}")
+        prInfo(f"Loading episode: {session}/{episode} | {associated_episodes_flags_dict[episode]['flag']}")
         
         # Load images
         images_dir = os.path.join(episode_dir, "images_360")
@@ -1734,7 +1770,7 @@ class Interact360Visualizer(QMainWindow):
         
         try:
             # Create backup
-            session, episode = self.episodes_list[self.current_episode_idx]
+            session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
             episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
             detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
             
@@ -1773,7 +1809,7 @@ class Interact360Visualizer(QMainWindow):
     
     def save_detections_to_file(self):
         """Save current detections to JSON file"""
-        session, episode = self.episodes_list[self.current_episode_idx]
+        session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
         episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
         detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
         
