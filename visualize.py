@@ -561,7 +561,7 @@ class Interact360Visualizer(QMainWindow):
         self.show_track_ids = True
         self.show_interaction_highlights = True
         self.show_interaction_zone = False  # Option to constantly display interaction zone
-        self.mask_opacity = 30  # Default 30% opacity
+        self.mask_opacity = 70  # Default 70% opacity
         
         # Pose visualization options
         self.show_vitpose_poses = False
