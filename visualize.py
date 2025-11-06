@@ -572,6 +572,13 @@ class Interact360Visualizer(QMainWindow):
         # Track validity options
         self.show_invalid_tracks = True  # Show tracks that are not valid
         
+        # Miniature image support
+        self.use_mini = args.miniatures
+        prInfo(f"Using miniature images: {self.use_mini}")
+        self.scale_factor = 4.0 if self.use_mini else 1.0  # Miniature images are 4x smaller
+        self.full_image_height = None  # Full size image height (for mask decoding) - set when first image is loaded
+        self.full_image_width = None  # Full size image width (for mask decoding) - set when first image is loaded
+        
         # Edit mode options
         self.edit_mode = False
         self.edited_detections = {}  # Store local modifications
@@ -674,7 +681,7 @@ class Interact360Visualizer(QMainWindow):
                         episodes_list.append((self.args.recording_name, ep, associated_episodes_flags_dict))
                         
         episodes_list.sort()
-        prInfo(f"Found {len(episodes_list)} episodes: {episodes_list}")
+        prInfo(f"Found {len(episodes_list)} episodes")
         return episodes_list
     
     def load_interaction_mask(self):
@@ -1133,7 +1140,10 @@ class Interact360Visualizer(QMainWindow):
         prInfo(f"Loading episode: {session}/{episode} | {associated_episodes_flags_dict[episode]['flag']}")
         
         # Load images
-        images_dir = os.path.join(episode_dir, "images_360")
+        if self.use_mini:
+            images_dir = os.path.join(episode_dir, "miniatures_images_360_scale_4")
+        else:
+            images_dir = os.path.join(episode_dir, "images_360")
         self.image_files = self.get_image_files(images_dir)
         
         # Load detections
@@ -1387,10 +1397,24 @@ class Interact360Visualizer(QMainWindow):
         # Load image
         tic = time.time()
         image = cv2.imread(image_file)
-        self.image_height, self.image_width = image.shape[:2]
         if image is None:
             prError(f"Could not load image: {image_file}")
             return
+        
+        # Store image dimensions (miniature size if using mini)
+        self.image_height, self.image_width = image.shape[:2]
+        
+        # Store full image dimensions for mask decoding (if not set yet)
+        if self.use_mini and (self.full_image_height is None or self.full_image_width is None):
+            # Full size is scale_factor times the miniature size
+            self.full_image_height = int(self.image_height * self.scale_factor)
+            self.full_image_width = int(self.image_width * self.scale_factor)
+            prInfo(f"Using miniature images: {self.image_width}x{self.image_height} -> Full size: {self.full_image_width}x{self.full_image_height}")
+        elif not self.use_mini:
+            # Not using mini, so current size is full size
+            self.full_image_height = self.image_height
+            self.full_image_width = self.image_width
+        
         tac = time.time()
         # prTimer(f"Load image {image_file}", tic, tac)
         
@@ -1417,9 +1441,16 @@ class Interact360Visualizer(QMainWindow):
         image_copy = image.copy()
         image_height, image_width = image.shape[:2]
         
+        # Use full image dimensions for mask decoding and interaction zone
+        full_image_height = self.full_image_height if self.use_mini else image_height
+        full_image_width = self.full_image_width if self.use_mini else image_width
+        
         # Draw interaction zone as background overlay if enabled
         if self.show_interaction_zone:
-            interaction_mask = self.get_interaction_mask_for_frame(self.current_frame, (image_height, image_width))
+            interaction_mask = self.get_interaction_mask_for_frame(self.current_frame, (full_image_height, full_image_width))
+            if interaction_mask is not None and self.use_mini:
+                # Scale down interaction mask to miniature size
+                interaction_mask = cv2.resize(interaction_mask.astype(np.uint8), (image_width, image_height), interpolation=cv2.INTER_NEAREST).astype(bool)
             if interaction_mask is not None:
                 # Create semi-transparent overlay for interaction zone
                 zone_color = (255, 255, 0)  # Yellow for interaction zone
@@ -1436,7 +1467,7 @@ class Interact360Visualizer(QMainWindow):
         
         for det in detections:
             track_id = det.get("track_id", -1)
-            engagement_level = det.get("engagement_level", det.get("engagement_level_auto", -1))
+            engagement_level = det.get("engagement_level", det.get("engagement_level_auto", -1)) # where the fuck does this engagement_level_auto come from... 
             intersection_pixels = det.get("intersection_pixels", -1)
             
             # Filter based on track validity if option is disabled
@@ -1454,7 +1485,12 @@ class Interact360Visualizer(QMainWindow):
                 if self.is_track_selected(track_id):
                     thickness = 4  # Thicker for selected track
                     
-                xmin, ymin, xmax, ymax = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
+                # Scale coordinates down if using mini images
+                xmin = int(det["xmin"] / self.scale_factor)
+                ymin = int(det["ymin"] / self.scale_factor)
+                xmax = int(det["xmax"] / self.scale_factor)
+                ymax = int(det["ymax"] / self.scale_factor)
+                
                 if xmax > image_copy.shape[1]:
                     if xmin > image_copy.shape[1]:
                         # fully outside
@@ -1469,14 +1505,14 @@ class Interact360Visualizer(QMainWindow):
             # Draw track ID if enabled
             if self.show_track_ids:
                 font = cv2.FONT_HERSHEY_SIMPLEX
-                font_scale = 0.7
+                font_scale = 0.35 if self.use_mini else 0.7
                 font_thickness = 2
                 
                 text = f"ID: {track_id}"
-                x1 = int(det["xmin"])
+                x1 = int(det["xmin"] / self.scale_factor)
                 if x1 > image_copy.shape[1]:
                     x1 = x1 - image_copy.shape[1]
-                y1 = int(det["ymin"])
+                y1 = int(det["ymin"] / self.scale_factor)
                 
                 text_size = cv2.getTextSize(text, font, font_scale, font_thickness)[0]
                 cv2.rectangle(image_copy, (x1, y1 - text_size[1] - 10), 
@@ -1485,11 +1521,15 @@ class Interact360Visualizer(QMainWindow):
             
             # Draw mask if enabled and available
             if self.show_masks and "mask_rle" in det:
-                # Decode RLE mask
+                # Decode RLE mask to full size first
                 mask_rle = [int(x) for x in det["mask_rle"].split(",")]
                 mask_rle = torch.tensor(mask_rle, dtype=torch.int32).to(MASK_RLE_DEVICE)
-                mask = decode_RLE(mask_rle, (image_height, image_width))
+                mask = decode_RLE(mask_rle, (full_image_height, full_image_width))
                 mask_np = mask.cpu().numpy().astype(bool)
+                
+                # Scale down to miniature size if using mini
+                if self.use_mini:
+                    mask_np = cv2.resize(mask_np.astype(np.uint8), (image_width, image_height), interpolation=cv2.INTER_NEAREST).astype(bool)
                 
                 # Apply colored overlay
                 overlay = image_copy.copy()
@@ -1505,7 +1545,11 @@ class Interact360Visualizer(QMainWindow):
                 mask_rle = [int(x) for x in det["mask_rle"].split(",")]
                 mask_rle = torch.tensor(mask_rle, dtype=torch.int32)
                 intersection = self.get_mask_intersection_with_interaction_zone(
-                    mask_rle, (image_height, image_width), self.current_frame)
+                    mask_rle, (full_image_height, full_image_width), self.current_frame)
+                
+                # Scale down intersection mask if using mini
+                if intersection is not None and self.use_mini:
+                    intersection = cv2.resize(intersection.astype(np.uint8), (image_width, image_height), interpolation=cv2.INTER_NEAREST).astype(bool)
                 
                 if intersection is not None and intersection.any():
                     # Create a bright highlight overlay for interaction areas
@@ -1529,8 +1573,12 @@ class Interact360Visualizer(QMainWindow):
                     # Use mask contour for selected track
                     mask_rle = [int(x) for x in det["mask_rle"].split(",")]
                     mask_rle = torch.tensor(mask_rle, dtype=torch.int32).to(MASK_RLE_DEVICE)
-                    mask = decode_RLE(mask_rle, (image_height, image_width))
+                    mask = decode_RLE(mask_rle, (full_image_height, full_image_width))
                     mask_np = mask.cpu().numpy().astype(np.uint8)
+                    
+                    # Scale down mask if using mini
+                    if self.use_mini:
+                        mask_np = cv2.resize(mask_np, (image_width, image_height), interpolation=cv2.INTER_NEAREST)
                     
                     # Find contours
                     contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -1540,7 +1588,7 @@ class Interact360Visualizer(QMainWindow):
                         cv2.drawContours(image_copy, [largest_contour], -1, color, 6)
                 else:
                     # Fall back to thick bounding box when masks not available
-                    x1, y1, x2, y2 = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
+                    x1, y1, x2, y2 = int(det["xmin"] / self.scale_factor), int(det["ymin"] / self.scale_factor), int(det["xmax"] / self.scale_factor), int(det["ymax"] / self.scale_factor)
                     cv2.rectangle(image_copy, (x1, y1), (x2, y2), color, 8)
             
             # Draw ViTPose keypoints and skeleton if enabled
@@ -1558,7 +1606,7 @@ class Interact360Visualizer(QMainWindow):
                         # Draw keypoints
                         for i in range(keypoints.shape[0]):
                             if i < len(scores_vitpose) and scores_vitpose[i] > self.vitpose_min_score:
-                                kp_x, kp_y = int(keypoints[i, 0]), int(keypoints[i, 1])
+                                kp_x, kp_y = int(keypoints[i, 0] / self.scale_factor), int(keypoints[i, 1] / self.scale_factor)
                                 if kp_x > 0 and kp_y > 0:
                                     cv2.circle(image_copy, (kp_x, kp_y), 10, pose_color, -1)
                         
@@ -1566,8 +1614,8 @@ class Interact360Visualizer(QMainWindow):
                         for edge in COCO_EDGES:
                             if (edge[0] < len(scores_vitpose) and edge[1] < len(scores_vitpose) and 
                                 scores_vitpose[edge[0]] > self.vitpose_min_score and scores_vitpose[edge[1]] > self.vitpose_min_score):
-                                pt1 = (int(keypoints[edge[0], 0]), int(keypoints[edge[0], 1]))
-                                pt2 = (int(keypoints[edge[1], 0]), int(keypoints[edge[1], 1]))
+                                pt1 = (int(keypoints[edge[0], 0] / self.scale_factor), int(keypoints[edge[0], 1] / self.scale_factor))
+                                pt2 = (int(keypoints[edge[1], 0] / self.scale_factor), int(keypoints[edge[1], 1] / self.scale_factor))
                                 # put a maximum distance to avoid cross image points
                                 if abs(pt1[0] - pt2[0]) > image_width // 4:
                                     continue
@@ -1594,7 +1642,7 @@ class Interact360Visualizer(QMainWindow):
                         for i in range(sapiens_keypoints.shape[0]):
                             if sapiens_scores[i] > self.sapiens_min_score:
                                 kpt_color = GOLIATH_KPTS_COLORS[i]
-                                kp_x, kp_y = int(sapiens_keypoints[i, 0]), int(sapiens_keypoints[i, 1])
+                                kp_x, kp_y = int(sapiens_keypoints[i, 0] / self.scale_factor), int(sapiens_keypoints[i, 1] / self.scale_factor)
                                 if kp_x > 0 and kp_y > 0:
                                     cv2.circle(image_copy, (kp_x, kp_y), 3, kpt_color, -1)
                                 
@@ -1605,8 +1653,8 @@ class Interact360Visualizer(QMainWindow):
                             kp2_score = sapiens_scores[edge["link"][1]]
                             if kp1_score > self.sapiens_min_score and kp2_score > self.sapiens_min_score:
                                 edge_color = edge["color"]
-                                kp_x1, kp_y1 = int(sapiens_keypoints[edge["link"][0], 0]), int(sapiens_keypoints[edge["link"][0], 1])
-                                kp_x2, kp_y2 = int(sapiens_keypoints[edge["link"][1], 0]), int(sapiens_keypoints[edge["link"][1], 1])
+                                kp_x1, kp_y1 = int(sapiens_keypoints[edge["link"][0], 0] / self.scale_factor), int(sapiens_keypoints[edge["link"][0], 1] / self.scale_factor)
+                                kp_x2, kp_y2 = int(sapiens_keypoints[edge["link"][1], 0] / self.scale_factor), int(sapiens_keypoints[edge["link"][1], 1] / self.scale_factor)
                                 if abs(kp_x1 - kp_x2) > image_width // 4:
                                     continue
                                 if kp_x1 > 0 and kp_y1 > 0 and kp_x2 > 0 and kp_y2 > 0:
@@ -1675,12 +1723,16 @@ class Interact360Visualizer(QMainWindow):
         """Select a track by clicking on it in the image
         
         Args:
-            image_x: X coordinate in image space
-            image_y: Y coordinate in image space
+            image_x: X coordinate in image space (miniature size if using mini)
+            image_y: Y coordinate in image space (miniature size if using mini)
             ctrl_pressed: If True, toggle track in multi-selection. If False, single select.
         """
         if not self.edit_mode:
             return
+        
+        # Scale up click coordinates to full size for comparison with detection coordinates
+        full_image_x = int(image_x * self.scale_factor)
+        full_image_y = int(image_y * self.scale_factor)
         
         # Get current detections
         if self.edit_mode and self.current_frame in self.edited_detections:
@@ -1695,14 +1747,15 @@ class Interact360Visualizer(QMainWindow):
         for det in detections:
             xmin, ymin, xmax, ymax = int(det["xmin"]), int(det["ymin"]), int(det["xmax"]), int(det["ymax"])
             
-            # Handle 360° wrapping - boxes can wrap around
-            if xmax > self.image_width:
+            # Handle 360° wrapping - boxes can wrap around (use full image width for comparison)
+            full_image_width = self.full_image_width if self.use_mini else self.image_width
+            if xmax > full_image_width:
                 # Box wraps around - check if click is in either part
-                if ((xmin <= image_x < self.image_width) or (0 <= image_x < xmax - self.image_width)) and ymin <= image_y < ymax:
+                if ((xmin <= full_image_x < full_image_width) or (0 <= full_image_x < xmax - full_image_width)) and ymin <= full_image_y < ymax:
                     matching_dets.append(det)
             else:
                 # Normal box
-                if xmin <= image_x < xmax and ymin <= image_y < ymax:
+                if xmin <= full_image_x < xmax and ymin <= full_image_y < ymax:
                     matching_dets.append(det)
         
         if not matching_dets:
@@ -1730,16 +1783,17 @@ class Interact360Visualizer(QMainWindow):
         for det in matching_dets:
             if "mask_rle" in det:
                 try:
-                    # Decode mask
+                    # Decode mask to full size
                     mask_rle = [int(x) for x in det["mask_rle"].split(",")]
                     mask_rle = torch.tensor(mask_rle, dtype=torch.int32).to(MASK_RLE_DEVICE)
-                    mask = decode_RLE(mask_rle, (self.image_height, self.image_width))
+                    full_height = self.full_image_height if self.use_mini else self.image_height
+                    full_width = self.full_image_width if self.use_mini else self.image_width
+                    mask = decode_RLE(mask_rle, (full_height, full_width))
                     mask_np = mask.cpu().numpy().astype(bool)
                     
-                    # Check if click point is in mask
-                    # Masks are stored in image coordinates (0 to image_width), so check directly
-                    if 0 <= image_y < mask_np.shape[0] and 0 <= image_x < mask_np.shape[1]:
-                        if mask_np[image_y, image_x]:
+                    # Check if click point is in mask (use full-size coordinates)
+                    if 0 <= full_image_y < mask_np.shape[0] and 0 <= full_image_x < mask_np.shape[1]:
+                        if mask_np[full_image_y, full_image_x]:
                             mask_matching_dets.append(det)
                 except Exception as e:
                     prWarning(f"Error decoding mask for track selection: {e}")
@@ -2115,8 +2169,11 @@ class Interact360Visualizer(QMainWindow):
                 biggest_det = det1 if det1_mask_size > det2_mask_size else det2
                 smallest_det = det2 if det1_mask_size > det2_mask_size else det1
                 
-                biggest_det_mask = decode_RLE(torch.tensor([int(x) for x in biggest_det["mask_rle"].split(",")] , dtype=torch.int32).to(MASK_RLE_DEVICE), (self.image_height, self.image_width))
-                smallest_det_mask = decode_RLE(torch.tensor([int(x) for x in smallest_det["mask_rle"].split(",")], dtype=torch.int32).to(MASK_RLE_DEVICE), (self.image_height, self.image_width))
+                # Use full image dimensions for mask decoding
+                full_height = self.full_image_height if self.use_mini else self.image_height
+                full_width = self.full_image_width if self.use_mini else self.image_width
+                biggest_det_mask = decode_RLE(torch.tensor([int(x) for x in biggest_det["mask_rle"].split(",")] , dtype=torch.int32).to(MASK_RLE_DEVICE), (full_height, full_width))
+                smallest_det_mask = decode_RLE(torch.tensor([int(x) for x in smallest_det["mask_rle"].split(",")], dtype=torch.int32).to(MASK_RLE_DEVICE), (full_height, full_width))
                 
                 merged_mask = biggest_det_mask | smallest_det_mask
                 merged_mask_rle = encode_RLE(merged_mask)
@@ -2523,9 +2580,11 @@ class Interact360Visualizer(QMainWindow):
 def main():
     parser = argparse.ArgumentParser(description="Interact360 Visualizer")
     parser.add_argument("--directory", "-d", type=str, default="./demo/output/",
-                       help="Output directory containing processed data (e.g., demo/output)")
+                       help="Output directory containing processed data (e.g., demo/output), default: %(default)s")
     parser.add_argument("--recording_name", "-rn", type=str, default="",
-                       help="Recording name to visualize, if not provided will visualize all recordings in the directory")
+                       help="Recording name to visualize, if not provided will visualize all recordings in the directory (default: %(default)s)")
+    parser.add_argument("--miniatures", "-mini", action="store_true", default=False,
+                       help="Use miniature images (4x smaller) from images_360_miniatures_scale_4 (default: %(default)s)")
     
     args = parser.parse_args()
     
