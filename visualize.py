@@ -381,7 +381,7 @@ class EngagementCorrectionDialog(QDialog):
         self.num_frames = num_frames
         self.engagement_data = engagement_data
         self.new_engagement = 0
-        self.past_frames = 15
+        self.past_frames = 0
         self.future_frames = 15
         self.accepted_correction = False
         
@@ -417,7 +417,7 @@ class EngagementCorrectionDialog(QDialog):
         frame_range_layout.addWidget(QLabel("Past frames:"), 0, 0)
         self.past_frames_spin = QSpinBox()
         self.past_frames_spin.setRange(0, 1000)
-        self.past_frames_spin.setValue(15)
+        self.past_frames_spin.setValue(0)
         self.past_frames_spin.valueChanged.connect(self.update_preview)
         frame_range_layout.addWidget(self.past_frames_spin, 0, 1)
         
@@ -589,6 +589,7 @@ class Interact360Visualizer(QMainWindow):
         self.full_image_width = None  # Full size image width (for mask decoding) - set when first image is loaded
         
         # Image rolling to center interaction mask
+        self.enable_image_rolling = True  # Enable/disable image rolling (enabled by default)
         self.horizontal_roll_offset = 0  # Horizontal pixel offset for rolling the image
         
         # Edit mode options
@@ -619,6 +620,7 @@ class Interact360Visualizer(QMainWindow):
         self.play_skip = 1
         self.play_timer = QTimer()
         self.play_timer.timeout.connect(self.play_next_frame)
+        self.auto_speed_adjustment = True  # Enable automatic speed adjustment by default
         
         self.init_ui()
         self.load_episode_data()
@@ -821,6 +823,12 @@ class Interact360Visualizer(QMainWindow):
         skip_layout.addWidget(self.skip_spin)
         play_layout.addLayout(skip_layout)
         
+        # Auto speed adjustment
+        self.auto_speed_cb = QCheckBox("Auto Speed Adjustment")
+        self.auto_speed_cb.setChecked(True)
+        self.auto_speed_cb.toggled.connect(self.toggle_auto_speed_adjustment)
+        play_layout.addWidget(self.auto_speed_cb)
+        
         layout.addWidget(play_group)
         
         # Display options
@@ -853,6 +861,11 @@ class Interact360Visualizer(QMainWindow):
         self.show_interaction_zone_cb.setEnabled(self.interaction_mask is not None)
         self.show_interaction_zone_cb.toggled.connect(self.toggle_show_interaction_zone)
         options_layout.addWidget(self.show_interaction_zone_cb)
+        
+        self.enable_image_rolling_cb = QCheckBox("Enable Image Rolling")
+        self.enable_image_rolling_cb.setChecked(True)
+        self.enable_image_rolling_cb.toggled.connect(self.toggle_enable_image_rolling)
+        options_layout.addWidget(self.enable_image_rolling_cb)
         
         # Pose visualization options
         self.show_vitpose_poses_cb = QCheckBox("Show ViTPose Poses [P]")
@@ -910,7 +923,7 @@ class Interact360Visualizer(QMainWindow):
         edit_layout = QVBoxLayout(edit_group)
         
         # Edit mode toggle
-        self.edit_mode_cb = QCheckBox("Edit Mode [E]")
+        self.edit_mode_cb = QCheckBox("Edit Mode [Ctrl+E]")
         self.edit_mode_cb.setChecked(False)
         self.edit_mode_cb.toggled.connect(self.toggle_edit_mode)
         edit_layout.addWidget(self.edit_mode_cb)
@@ -928,7 +941,7 @@ class Interact360Visualizer(QMainWindow):
         self.set_valid_btn.clicked.connect(self.set_track_validity_valid)
         validity_buttons_layout.addWidget(self.set_valid_btn)
         
-        self.set_invalid_btn = QPushButton("Set Invalid [I]")
+        self.set_invalid_btn = QPushButton("Set Invalid [Ctrl+I]")
         self.set_invalid_btn.clicked.connect(self.set_track_validity_invalid)
         validity_buttons_layout.addWidget(self.set_invalid_btn)
         
@@ -960,6 +973,14 @@ class Interact360Visualizer(QMainWindow):
         self.engagement_correction_btn = QPushButton("Engagement Correction [E]")
         self.engagement_correction_btn.clicked.connect(self.open_engagement_correction_dialog)
         engagement_layout.addWidget(self.engagement_correction_btn)
+        
+        self.set_engagement_zero_btn = QPushButton("Set Engagement to 0 (±15 frames) [Ctrl+X]")
+        self.set_engagement_zero_btn.clicked.connect(self.set_engagement_to_zero)
+        engagement_layout.addWidget(self.set_engagement_zero_btn)
+        
+        self.set_engagement_three_btn = QPushButton("Set Engagement to 3 (+15 frames) [Ctrl+W]")
+        self.set_engagement_three_btn.clicked.connect(self.set_engagement_to_three)
+        engagement_layout.addWidget(self.set_engagement_three_btn)
         
         track_edit_layout.addWidget(engagement_group)
         
@@ -1120,12 +1141,16 @@ class Interact360Visualizer(QMainWindow):
         QShortcut(QKeySequence("V"), self, lambda: self.show_invalid_tracks_cb.setChecked(not self.show_invalid_tracks_cb.isChecked()))
         
         # Edit mode shortcuts
-        # E key: if edit mode is active and a track is selected, do engagement correction; otherwise toggle edit mode
+        QShortcut(QKeySequence("Ctrl+E"), self, lambda: self.edit_mode_cb.setChecked(not self.edit_mode_cb.isChecked()))
+        # E key: if edit mode is active and a track is selected, do engagement correction
         self.e_shortcut = QShortcut(QKeySequence("E"), self)
         self.e_shortcut.activated.connect(self.handle_e_key)
         QShortcut(QKeySequence("Ctrl+S"), self, self.save_changes)
         QShortcut(QKeySequence("Ctrl+D"), self, self.discard_changes)
         QShortcut(QKeySequence("C"), self, self.append_checked_flag)
+        QShortcut(QKeySequence("Ctrl+I"), self, self.set_track_validity_invalid)
+        QShortcut(QKeySequence("Ctrl+X"), self, self.set_engagement_to_zero)
+        QShortcut(QKeySequence("Ctrl+W"), self, self.set_engagement_to_three)
         
         # Track selection
         QShortcut(QKeySequence("Escape"), self, self.clear_track_selection)
@@ -1156,6 +1181,13 @@ class Interact360Visualizer(QMainWindow):
             images_dir = os.path.join(episode_dir, "miniatures_images_360_scale_4")
         else:
             images_dir = os.path.join(episode_dir, "images_360")
+        
+        
+        
+        #### JUST here harcoded to process images we cannot move locally
+        if self.args.use_images_from_remote_group_storage:
+            images_dir = images_dir.replace("/media/raphael/hucedisk3/SSUP/FullVideos/", "/home/raphael/group_storage/rlorenzo/SSUP/FullVideos/")
+            
         self.image_files = self.get_image_files(images_dir)
         
         # Load detections
@@ -1454,6 +1486,10 @@ class Interact360Visualizer(QMainWindow):
     
     def apply_horizontal_roll(self, image):
         """Apply horizontal roll to center the interaction mask"""
+        if not self.enable_image_rolling:
+            self.horizontal_roll_offset = 0
+            return image
+        
         image_height, image_width = image.shape[:2]
         
         # Get interaction mask bbox for current frame
@@ -1976,10 +2012,44 @@ class Interact360Visualizer(QMainWindow):
     def change_episode(self, index):
         """Change current episode"""
         if self.edit_mode:
-            QMessageBox.warning(self, "Edit Mode", "Cannot switch episodes while in edit mode. Please save or discard changes first.")
-            # Reset combo box to current episode
-            self.episode_combo.setCurrentIndex(self.current_episode_idx)
-            return
+            # Automatically save changes and exit edit mode
+            if self.edited_detections:
+                # Save changes silently (no message box)
+                try:
+                    # Create backup
+                    session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
+                    episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
+                    detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
+                    
+                    if os.path.exists(detection_file):
+                        # Create timestamped backup
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        backup_file = os.path.join(episode_dir, f"sam2_detections_360_backup_{timestamp}.json")
+                        import shutil
+                        shutil.copy2(detection_file, backup_file)
+                    
+                    # Apply changes to original detections
+                    for frame_idx, frame_data in self.edited_detections.items():
+                        if frame_idx in self.detections:
+                            # Replace original detections with edited ones
+                            self.detections[frame_idx]["detections"] = frame_data["detections"]
+                    
+                    # Save to file
+                    self.save_detections_to_file()
+                    
+                    # Clear edited detections
+                    self.edited_detections = {}
+                    
+                    self.statusBar().showMessage("Changes saved automatically before switching episode")
+                    prInfo("Changes saved automatically before switching episode")
+                except Exception as e:
+                    prError(f"Failed to save changes automatically: {str(e)}")
+                    # Reset combo box to current episode on error
+                    self.episode_combo.setCurrentIndex(self.current_episode_idx)
+                    return
+            
+            # Exit edit mode
+            self.edit_mode_cb.setChecked(False)
             
         if 0 <= index < len(self.episodes_list):
             if self.is_playing:
@@ -2023,7 +2093,19 @@ class Interact360Visualizer(QMainWindow):
         if not self.is_playing:
             return
         
-        next_frame = self.current_frame + self.play_skip
+        # Calculate effective skip based on auto speed adjustment
+        effective_skip = self.play_skip
+        
+        if self.auto_speed_adjustment:
+            # Check next 45 frames for big masks or engaged tracks
+            has_activity = self.check_frames_for_activity(self.current_frame, num_frames=45)
+            
+            if not has_activity:
+                # No big masks or engaged tracks, speed up by 5x
+                effective_skip = self.play_skip * 5
+            # Otherwise use normal play_skip
+        
+        next_frame = self.current_frame + effective_skip
         
         if next_frame >= len(self.image_files):
             self.pause_playback()
@@ -2035,6 +2117,41 @@ class Interact360Visualizer(QMainWindow):
     def update_skip(self, value):
         """Update skip parameter"""
         self.play_skip = value
+    
+    def toggle_auto_speed_adjustment(self, checked):
+        """Toggle automatic speed adjustment"""
+        self.auto_speed_adjustment = checked
+    
+    def check_frames_for_activity(self, start_frame, num_frames=45):
+        """Check if there are big masks or engaged tracks in the next frames
+        
+        Returns:
+            bool: True if big masks (>100k pixels) or engaged tracks (level 3) found, False otherwise
+        """
+        end_frame = min(start_frame + num_frames, len(self.image_files))
+        
+        for frame_idx in range(start_frame, end_frame):
+            # Get detections for this frame (use edited if available)
+            if self.edit_mode and frame_idx in self.edited_detections:
+                detections = self.edited_detections[frame_idx]["detections"]
+            elif frame_idx in self.detections:
+                detections = self.detections[frame_idx]["detections"]
+            else:
+                continue
+            
+            for det in detections:
+                # Check for big mask (>100,000 pixels)
+                if "mask_size" in det:
+                    mask_size = det.get("mask_size", 0)
+                    if mask_size > 100000:
+                        return True
+                
+                # Check for engaged track (engagement_level == 3)
+                engagement_level = det.get("engagement_level", det.get("engagement_level_auto", -1))
+                if engagement_level == 3:
+                    return True
+        
+        return False
     
     # Display option toggles
     def toggle_show_masks(self, checked):
@@ -2060,6 +2177,11 @@ class Interact360Visualizer(QMainWindow):
     
     def toggle_show_interaction_zone(self, checked):
         self.show_interaction_zone = checked
+        self.update_image_display()
+    
+    def toggle_enable_image_rolling(self, checked):
+        """Toggle image rolling to center interaction mask"""
+        self.enable_image_rolling = checked
         self.update_image_display()
     
     def toggle_show_vitpose_poses(self, checked):
@@ -2391,7 +2513,7 @@ class Interact360Visualizer(QMainWindow):
                 del self.track_intersection_pixels_data[track_id]
     
     def handle_e_key(self):
-        """Handle E key press: engagement correction if in edit mode with track selected, else toggle edit mode"""
+        """Handle E key press: engagement correction if in edit mode with track selected"""
         if self.edit_mode:
             # Check if exactly one track is selected
             selected_tracks = self.get_selected_tracks()
@@ -2399,11 +2521,42 @@ class Interact360Visualizer(QMainWindow):
                 # Open engagement correction dialog
                 self.open_engagement_correction_dialog()
             else:
-                # No track or multiple tracks selected, just toggle edit mode
-                self.edit_mode_cb.setChecked(not self.edit_mode_cb.isChecked())
-        else:
-            # Not in edit mode, toggle edit mode
-            self.edit_mode_cb.setChecked(not self.edit_mode_cb.isChecked())
+                # No track or multiple tracks selected
+                QMessageBox.warning(self, "Invalid Selection", "Please select exactly one track to correct engagement level.")
+    
+    def set_engagement_to_zero(self):
+        """Set selected track's engagement to 0 for ±15 frames"""
+        if not self.edit_mode:
+            QMessageBox.warning(self, "Edit Mode Required", "Please enable edit mode first.")
+            return
+        
+        # Check that exactly one track is selected
+        selected_tracks = self.get_selected_tracks()
+        if len(selected_tracks) != 1:
+            QMessageBox.warning(self, "Invalid Selection", "Please select exactly one track.")
+            return
+        
+        track_id = selected_tracks[0]
+        
+        # Apply engagement correction: set to 0 for ±15 frames
+        self.apply_engagement_correction(track_id, 0, 15, 15)
+    
+    def set_engagement_to_three(self):
+        """Set selected track's engagement to 3 for the next 15 frames"""
+        if not self.edit_mode:
+            QMessageBox.warning(self, "Edit Mode Required", "Please enable edit mode first.")
+            return
+        
+        # Check that exactly one track is selected
+        selected_tracks = self.get_selected_tracks()
+        if len(selected_tracks) != 1:
+            QMessageBox.warning(self, "Invalid Selection", "Please select exactly one track.")
+            return
+        
+        track_id = selected_tracks[0]
+        
+        # Apply engagement correction: set to 3 for next 15 frames only (0 past frames)
+        self.apply_engagement_correction(track_id, 3, 0, 15)
     
     def open_engagement_correction_dialog(self):
         """Open dialog for correcting engagement levels"""
@@ -2590,10 +2743,6 @@ class Interact360Visualizer(QMainWindow):
     
     def update_episode_flag(self, new_flag):
         """Update the episode flag and save to file"""
-        if not self.edit_mode:
-            QMessageBox.warning(self, "Edit Mode Required", "Please enable edit mode first.")
-            return False
-        
         if self.current_episodes_flags_path is None:
             QMessageBox.warning(self, "Error", "No episodes flags path available.")
             return False
@@ -2627,10 +2776,6 @@ class Interact360Visualizer(QMainWindow):
     
     def append_checked_flag(self):
         """Append ',checked' to the current episode flag"""
-        if not self.edit_mode:
-            QMessageBox.warning(self, "Edit Mode Required", "Please enable edit mode first.")
-            return
-        
         session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
         current_flag = associated_episodes_flags_dict[episode]["flag"]
         
@@ -2675,7 +2820,8 @@ def main():
                        help="Recording name to visualize, if not provided will visualize all recordings in the directory (default: %(default)s)")
     parser.add_argument("--miniatures", "-mini", action="store_true", default=False,
                        help="Use miniature images (4x smaller) from images_360_miniatures_scale_4 (default: %(default)s)")
-    
+    parser.add_argument("--use_images_from_remote_group_storage", "-rgs", action="store_true", default=False,
+                       help="Use images from remote group storage (default: %(default)s)")
     args = parser.parse_args()
     
     # Validate arguments
