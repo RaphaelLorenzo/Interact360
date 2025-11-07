@@ -4,6 +4,7 @@
 import sys
 import os
 import argparse
+from tkinter import N
 import numpy as np
 import cv2
 import json
@@ -329,6 +330,14 @@ class ImageDisplayWidget(QLabel):
                 
                 image_x, image_y = self.widget_to_image_coords(widget_x, widget_y)
                 if image_x is not None and image_y is not None:
+                    # Remap coordinates to account for horizontal roll
+                    # np.roll shifts right for positive offset: Original[i] -> Rolled[(i + offset) % width]
+                    # So to unroll: Rolled[x] -> Original[(x - offset) % width]
+                    if self.visualizer.horizontal_roll_offset != 0:
+                        image_width = self.image_size[0]
+                        # Unroll: subtract the offset (with wrapping)
+                        image_x = (image_x - self.visualizer.horizontal_roll_offset) % image_width
+                    
                     # Check if Ctrl key is pressed for multi-selection
                     ctrl_pressed = event.modifiers() & Qt.KeyboardModifier.ControlModifier
                     self.visualizer.select_track_by_click(image_x, image_y, ctrl_pressed)
@@ -578,6 +587,9 @@ class Interact360Visualizer(QMainWindow):
         self.scale_factor = 4.0 if self.use_mini else 1.0  # Miniature images are 4x smaller
         self.full_image_height = None  # Full size image height (for mask decoding) - set when first image is loaded
         self.full_image_width = None  # Full size image width (for mask decoding) - set when first image is loaded
+        
+        # Image rolling to center interaction mask
+        self.horizontal_roll_offset = 0  # Horizontal pixel offset for rolling the image
         
         # Edit mode options
         self.edit_mode = False
@@ -1286,7 +1298,7 @@ class Interact360Visualizer(QMainWindow):
         """Get the intersection of a track mask with the interaction zone"""
         # Get the appropriate interaction mask for this frame
         if frame_index is not None:
-            interaction_mask_resized = self.get_interaction_mask_for_frame(frame_index, image_shape)
+            interaction_mask_resized, _ = self.get_interaction_mask_for_frame(frame_index, image_shape)
         else:
             interaction_mask_resized = self.get_static_interaction_mask(image_shape)
             
@@ -1315,13 +1327,14 @@ class Interact360Visualizer(QMainWindow):
                         mask_rle = [int(x) for x in interaction_det["mask_rle"].split(",")]
                         mask_rle = torch.tensor(mask_rle, dtype=torch.int32).to(MASK_RLE_DEVICE)
                         mask = decode_RLE(mask_rle, image_shape)
-                        return mask.cpu().numpy().astype(bool)
+                        bbox = [interaction_det["xmin"], interaction_det["ymin"], interaction_det["xmax"], interaction_det["ymax"]]
+                        return mask.cpu().numpy().astype(bool), bbox
 
             # Fallback to static mask if dynamic fails or not available
-            return self.get_static_interaction_mask(image_shape)
+            return self.get_static_interaction_mask(image_shape), None
         else:
             # Use static interaction mask
-            return self.get_static_interaction_mask(image_shape)
+            return self.get_static_interaction_mask(image_shape), None
     
     def get_static_interaction_mask(self, image_shape):
         """Get the static interaction mask resized to image shape"""
@@ -1424,6 +1437,9 @@ class Interact360Visualizer(QMainWindow):
         tac = time.time()
         # prTimer(f"Draw tracks on image", tic, tac)
         
+        # Calculate and apply horizontal roll to center interaction mask
+        image = self.apply_horizontal_roll(image)
+        
         # Convert BGR to RGB for Qt
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
@@ -1436,6 +1452,80 @@ class Interact360Visualizer(QMainWindow):
         tac_global = time.time()
         # prTimer(f"Update image display", tic_global, tac_global)
     
+    def apply_horizontal_roll(self, image):
+        """Apply horizontal roll to center the interaction mask"""
+        image_height, image_width = image.shape[:2]
+        
+        # Get interaction mask bbox for current frame
+        full_image_height = self.full_image_height if self.use_mini else image_height
+        full_image_width = self.full_image_width if self.use_mini else image_width
+        
+        interaction_mask, bbox = self.get_interaction_mask_for_frame(self.current_frame, (full_image_height, full_image_width))
+        
+        if bbox is None:
+            # No bbox available, don't roll
+            self.horizontal_roll_offset = 0
+            return image
+        
+        # Calculate bbox center (handle 360° wrapping)
+        xmin, ymin, xmax, ymax = bbox
+        
+        # Scale bbox to image size if using mini
+        if self.use_mini:
+            xmin = int(xmin / self.scale_factor)
+            ymin = int(ymin / self.scale_factor)
+            xmax = int(xmax / self.scale_factor)
+            ymax = int(ymax / self.scale_factor)
+        
+        # # Calculate center x coordinate (handle wrapping)
+        # # For 360° images, we need to handle wrapping carefully
+        # if xmax > image_width:
+        #     # Bbox wraps around
+        #     if xmin > image_width:
+        #         # Entire bbox is in wrapped part (xmin and xmax both > image_width)
+        #         # Unwrap coordinates
+        #         unwrapped_xmin = xmin - image_width
+        #         unwrapped_xmax = xmax - image_width
+        #         center_x = (unwrapped_xmin + unwrapped_xmax) / 2.0
+        #     else:
+        #         # Bbox spans both sides (xmin < image_width, xmax > image_width)
+        #         # The bbox spans from xmin to image_width (left part) and from 0 to (xmax - image_width) (right part)
+        #         left_part_width = image_width - xmin
+        #         right_part_width = xmax - image_width
+                
+        #         # Calculate center based on which part is larger
+        #         if left_part_width >= right_part_width:
+        #             # Center is in the left part
+        #             center_x = xmin + left_part_width / 2.0
+        #         else:
+        #             # Center is in the right part (wrapped)
+        #             center_x = right_part_width / 2.0
+        # else:
+        # Normal bbox, no wrapping
+        center_x = (xmin + xmax) / 2.0
+        
+        # Calculate offset to center the bbox center at image_width/2
+        target_center = image_width / 2.0
+        offset = int(target_center - center_x)
+        
+        # Handle wrapping: if offset is large, we might want to roll the other way
+        # For 360° images, we can roll in either direction
+        if abs(offset) > image_width / 2:
+            # Roll the other way (shorter distance)
+            if offset > 0:
+                offset = offset - image_width
+            else:
+                offset = offset + image_width
+        
+        # Store offset for click remapping
+        self.horizontal_roll_offset = offset
+        
+        # Apply horizontal roll using numpy roll
+        if offset != 0:
+            image = np.roll(image, offset, axis=1)
+        
+        return image
+    
     def draw_tracks_on_image(self, image, detections):
         """Draw track visualizations on image"""
         image_copy = image.copy()
@@ -1447,7 +1537,7 @@ class Interact360Visualizer(QMainWindow):
         
         # Draw interaction zone as background overlay if enabled
         if self.show_interaction_zone:
-            interaction_mask = self.get_interaction_mask_for_frame(self.current_frame, (full_image_height, full_image_width))
+            interaction_mask, _ = self.get_interaction_mask_for_frame(self.current_frame, (full_image_height, full_image_width))
             if interaction_mask is not None and self.use_mini:
                 # Scale down interaction mask to miniature size
                 interaction_mask = cv2.resize(interaction_mask.astype(np.uint8), (image_width, image_height), interpolation=cv2.INTER_NEAREST).astype(bool)
