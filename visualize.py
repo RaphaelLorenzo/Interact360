@@ -540,6 +540,86 @@ class EngagementCorrectionDialog(QDialog):
         self.accept()
 
 
+class AllTracksEngagementDialog(QDialog):
+    """Dialog for setting engagement level for all tracks in a frame range"""
+    
+    def __init__(self, parent, current_frame, num_frames):
+        """
+        Args:
+            parent: Parent window
+            current_frame: Current frame index
+            num_frames: Total number of frames
+        """
+        super().__init__(parent)
+        self.current_frame = current_frame
+        self.num_frames = num_frames
+        self.new_engagement = 0
+        self.past_frames = 0
+        self.future_frames = 0
+        self.accepted = False
+        
+        self.setWindowTitle("Set Engagement for All Tracks")
+        self.setMinimumSize(400, 200)
+        
+        layout = QVBoxLayout(self)
+        
+        # Info label
+        info_label = QLabel(f"Current Frame: {current_frame} | Total Frames: {num_frames}")
+        info_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+        layout.addWidget(info_label)
+        
+        # Engagement level selection
+        engagement_group = QGroupBox("New Engagement Level")
+        engagement_layout = QVBoxLayout(engagement_group)
+        
+        self.engagement_button_group = QButtonGroup(self)
+        self.not_engaged_radio = QRadioButton("0 - Not Engaged")
+        self.not_engaged_radio.setChecked(True)
+        self.engaged_radio = QRadioButton("3 - Engaged")
+        self.engagement_button_group.addButton(self.not_engaged_radio, 0)
+        self.engagement_button_group.addButton(self.engaged_radio, 3)
+        engagement_layout.addWidget(self.not_engaged_radio)
+        engagement_layout.addWidget(self.engaged_radio)
+        
+        layout.addWidget(engagement_group)
+        
+        # Frame range selection
+        frame_range_group = QGroupBox("Frame Range")
+        frame_range_layout = QGridLayout(frame_range_group)
+        
+        frame_range_layout.addWidget(QLabel("Past frames:"), 0, 0)
+        self.past_frames_spin = QSpinBox()
+        self.past_frames_spin.setRange(0, 10000)
+        self.past_frames_spin.setValue(0)
+        frame_range_layout.addWidget(self.past_frames_spin, 0, 1)
+        
+        frame_range_layout.addWidget(QLabel("Future frames:"), 1, 0)
+        self.future_frames_spin = QSpinBox()
+        self.future_frames_spin.setRange(0, 10000)
+        self.future_frames_spin.setValue(0)
+        frame_range_layout.addWidget(self.future_frames_spin, 1, 1)
+        
+        layout.addWidget(frame_range_group)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept_dialog)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+    
+    def accept_dialog(self):
+        """Accept the dialog and store the values"""
+        if self.engaged_radio.isChecked():
+            self.new_engagement = 3
+        else:
+            self.new_engagement = 0
+        
+        self.past_frames = self.past_frames_spin.value()
+        self.future_frames = self.future_frames_spin.value()
+        self.accepted = True
+        self.accept()
+
+
 class Interact360Visualizer(QMainWindow):
     def __init__(self, args):
         super().__init__()
@@ -593,7 +673,7 @@ class Interact360Visualizer(QMainWindow):
         self.horizontal_roll_offset = 0  # Horizontal pixel offset for rolling the image
         
         # Edit mode options
-        self.edit_mode = False
+        self.edit_mode = True  # Enable edit mode by default
         self.edited_detections = {}  # Store local modifications
         self.next_available_id = 0  # Next available track ID for splitting
         self.current_episodes_flags_path = None  # Path to episodes_flag.json for current episode
@@ -617,13 +697,18 @@ class Interact360Visualizer(QMainWindow):
         
         # Play/Pause functionality
         self.is_playing = False
-        self.play_skip = 1
+        self.play_skip = 7
         self.play_timer = QTimer()
         self.play_timer.timeout.connect(self.play_next_frame)
         self.auto_speed_adjustment = True  # Enable automatic speed adjustment by default
         
         self.init_ui()
         self.load_episode_data()
+        
+        # Initialize edit mode since it's enabled by default
+        if self.edit_mode:
+            self.initialize_edited_detections()
+            self.calculate_next_available_id()
         
     def create_episodes_flags_file(self, episodes_flags_path, episodes_desc_path):
         episodes_desc_dict = read_json_to_dic(episodes_desc_path) # list like : [{"session": "2022_09_21_astor_place_recycle", "episode": "0000", "start_time": 1756981182.0, "end_time": 1756981301.9999995}...]
@@ -817,7 +902,7 @@ class Interact360Visualizer(QMainWindow):
         skip_layout = QHBoxLayout()
         skip_layout.addWidget(QLabel("Skip:"))
         self.skip_spin = QSpinBox()
-        self.skip_spin.setRange(1, 20)
+        self.skip_spin.setRange(1, 30)
         self.skip_spin.setValue(self.play_skip)
         self.skip_spin.valueChanged.connect(self.update_skip)
         skip_layout.addWidget(self.skip_spin)
@@ -924,11 +1009,11 @@ class Interact360Visualizer(QMainWindow):
         
         # Edit mode toggle
         self.edit_mode_cb = QCheckBox("Edit Mode [Ctrl+E]")
-        self.edit_mode_cb.setChecked(False)
+        self.edit_mode_cb.setChecked(True)  # Enable edit mode by default
         self.edit_mode_cb.toggled.connect(self.toggle_edit_mode)
         edit_layout.addWidget(self.edit_mode_cb)
         
-        # Track editing controls (initially hidden)
+        # Track editing controls (visible by default since edit mode is enabled)
         self.track_edit_widget = QWidget()
         track_edit_layout = QVBoxLayout(self.track_edit_widget)
         
@@ -941,7 +1026,7 @@ class Interact360Visualizer(QMainWindow):
         self.set_valid_btn.clicked.connect(self.set_track_validity_valid)
         validity_buttons_layout.addWidget(self.set_valid_btn)
         
-        self.set_invalid_btn = QPushButton("Set Invalid [Ctrl+I]")
+        self.set_invalid_btn = QPushButton("Set Invalid [Ctrl+F]")
         self.set_invalid_btn.clicked.connect(self.set_track_validity_invalid)
         validity_buttons_layout.addWidget(self.set_invalid_btn)
         
@@ -982,6 +1067,10 @@ class Interact360Visualizer(QMainWindow):
         self.set_engagement_three_btn.clicked.connect(self.set_engagement_to_three)
         engagement_layout.addWidget(self.set_engagement_three_btn)
         
+        self.set_all_tracks_engagement_btn = QPushButton("Set All Tracks Engagement")
+        self.set_all_tracks_engagement_btn.clicked.connect(self.open_all_tracks_engagement_dialog)
+        engagement_layout.addWidget(self.set_all_tracks_engagement_btn)
+        
         track_edit_layout.addWidget(engagement_group)
         
         # Episode flag updates
@@ -1017,7 +1106,7 @@ class Interact360Visualizer(QMainWindow):
         track_edit_layout.addLayout(save_layout)
         
         edit_layout.addWidget(self.track_edit_widget)
-        self.track_edit_widget.setVisible(False)
+        self.track_edit_widget.setVisible(True)  # Visible by default since edit mode is enabled
         
         layout.addWidget(edit_group)
         
@@ -1148,7 +1237,7 @@ class Interact360Visualizer(QMainWindow):
         QShortcut(QKeySequence("Ctrl+S"), self, self.save_changes)
         QShortcut(QKeySequence("Ctrl+D"), self, self.discard_changes)
         QShortcut(QKeySequence("C"), self, self.append_checked_flag)
-        QShortcut(QKeySequence("Ctrl+I"), self, self.set_track_validity_invalid)
+        QShortcut(QKeySequence("Ctrl+F"), self, self.set_track_validity_invalid)
         QShortcut(QKeySequence("Ctrl+X"), self, self.set_engagement_to_zero)
         QShortcut(QKeySequence("Ctrl+W"), self, self.set_engagement_to_three)
         
@@ -1223,6 +1312,11 @@ class Interact360Visualizer(QMainWindow):
         status_msg = f"Loaded episode {session}/{episode} - {len(self.image_files)} frames, {len(self.detections)} detection frames"
         self.statusBar().showMessage(status_msg)
         prInfo(status_msg)
+        
+        # Initialize edit mode if enabled
+        if self.edit_mode:
+            self.initialize_edited_detections()
+            self.calculate_next_available_id()
 
     
     def get_image_files(self, directory):
@@ -2048,8 +2142,8 @@ class Interact360Visualizer(QMainWindow):
                     self.episode_combo.setCurrentIndex(self.current_episode_idx)
                     return
             
-            # Exit edit mode
-            self.edit_mode_cb.setChecked(False)
+            # Keep edit mode enabled (don't exit edit mode)
+            # Edit mode stays on when switching episodes
             
         if 0 <= index < len(self.episodes_list):
             if self.is_playing:
@@ -2280,6 +2374,7 @@ class Interact360Visualizer(QMainWindow):
     def set_track_validity_invalid(self):
         """Set selected track validity to invalid"""
         if not self.edit_mode:
+            prWarning("Not in edit mode")
             return
         
         selected_tracks = self.get_selected_tracks()
@@ -2666,6 +2761,133 @@ class Interact360Visualizer(QMainWindow):
         
         self.statusBar().showMessage(f"Applied engagement correction to track {track_id}: {new_engagement} for frames {frame_start}-{frame_end} ({frames_modified} detections modified)")
         prInfo(f"Engagement correction applied: Track {track_id}, Level {new_engagement}, Frames {frame_start}-{frame_end}")
+        
+        # Update display
+        self.update_image_display()
+        self.update_plots()
+    
+    def open_all_tracks_engagement_dialog(self):
+        """Open dialog to set engagement for all tracks in a frame range"""
+        if not self.edit_mode:
+            QMessageBox.warning(self, "Edit Mode Required", "Please enable edit mode first.")
+            return
+        
+        # Open dialog
+        dialog = AllTracksEngagementDialog(
+            self,
+            self.current_frame,
+            len(self.image_files)
+        )
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.accepted:
+            # Show warning before applying
+            frame_start = max(0, self.current_frame - dialog.past_frames)
+            frame_end = min(len(self.image_files) - 1, self.current_frame + dialog.future_frames)
+            num_frames = frame_end - frame_start + 1
+            
+            reply = QMessageBox.warning(
+                self,
+                "Confirm Engagement Update",
+                f"This will set engagement level {dialog.new_engagement} for ALL tracks "
+                f"in frames {frame_start} to {frame_end} ({num_frames} frames).\n\n"
+                f"This action cannot be undone easily. Are you sure you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.apply_all_tracks_engagement(
+                    dialog.new_engagement,
+                    dialog.past_frames,
+                    dialog.future_frames
+                )
+    
+    def apply_all_tracks_engagement(self, new_engagement, past_frames, future_frames):
+        """Apply engagement level to all tracks in the specified frame range"""
+        # Calculate frame range
+        frame_start = max(0, self.current_frame - past_frames)
+        frame_end = min(len(self.image_files) - 1, self.current_frame + future_frames)
+        
+        # Initialize edited detections if needed
+        if not self.edited_detections:
+            self.initialize_edited_detections()
+        
+        # Track all affected track IDs
+        affected_tracks = set()
+        total_detections_modified = 0
+        
+        # Apply correction to all tracks in all frames in range
+        for frame_idx in range(frame_start, frame_end + 1):
+            if frame_idx in self.edited_detections:
+                for det in self.edited_detections[frame_idx].get("detections", []):
+                    track_id = det.get("track_id", -1)
+                    if track_id >= 0:  # Valid track ID
+                        # Update engagement level
+                        det["engagement_level"] = new_engagement
+                        # Also update engagement_level_auto if it exists
+                        if "engagement_level_auto" in det:
+                            det["engagement_level_auto"] = new_engagement
+                        affected_tracks.add(track_id)
+                        total_detections_modified += 1
+        
+        # Update engagement plot data for all affected tracks
+        for track_id in affected_tracks:
+            # Initialize if needed
+            if track_id not in self.track_engagement_data:
+                self.track_engagement_data[track_id] = {'frames': [], 'engagement': []}
+            
+            # Update the engagement data for this track
+            orig_frames = self.track_engagement_data[track_id]['frames']
+            orig_engagement = self.track_engagement_data[track_id]['engagement']
+            
+            # Create a set of frames that already have engagement data
+            existing_frames = set(orig_frames)
+            
+            # Create updated lists
+            updated_frames = []
+            updated_engagement = []
+            
+            # Process existing frames
+            for frame, engagement in zip(orig_frames, orig_engagement):
+                if frame_start <= frame <= frame_end:
+                    # Use new engagement level
+                    updated_frames.append(frame)
+                    updated_engagement.append(new_engagement)
+                else:
+                    # Keep original
+                    updated_frames.append(frame)
+                    updated_engagement.append(engagement)
+            
+            # Add engagement data for frames in range that don't have it yet but have the track
+            for frame_idx in range(frame_start, frame_end + 1):
+                if frame_idx not in existing_frames:
+                    # Check if this frame has the track
+                    if frame_idx in self.edited_detections:
+                        for det in self.edited_detections[frame_idx].get("detections", []):
+                            if det.get("track_id", -1) == track_id:
+                                # Add new engagement data
+                                updated_frames.append(frame_idx)
+                                updated_engagement.append(new_engagement)
+                                break
+            
+            # Sort by frame number
+            sorted_pairs = sorted(zip(updated_frames, updated_engagement))
+            updated_frames = [f for f, e in sorted_pairs]
+            updated_engagement = [e for f, e in sorted_pairs]
+            
+            # Update the data
+            self.track_engagement_data[track_id]['frames'] = updated_frames
+            self.track_engagement_data[track_id]['engagement'] = updated_engagement
+        
+        self.statusBar().showMessage(
+            f"Applied engagement {new_engagement} to {len(affected_tracks)} tracks "
+            f"in frames {frame_start}-{frame_end} ({total_detections_modified} detections modified)"
+        )
+        prInfo(
+            f"Applied engagement {new_engagement} to all tracks: "
+            f"{len(affected_tracks)} tracks, Frames {frame_start}-{frame_end}, "
+            f"{total_detections_modified} detections modified"
+        )
         
         # Update display
         self.update_image_display()
