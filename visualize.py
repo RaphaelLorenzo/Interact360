@@ -344,6 +344,38 @@ class ImageDisplayWidget(QLabel):
         
         super().mousePressEvent(event)
     
+    def wheelEvent(self, event):
+        """Handle mouse wheel events to control frame slider"""
+        if self.visualizer and self.visualizer.frame_slider:
+            # Get the angle delta (positive for scrolling up/away, negative for scrolling down/toward)
+            angle_delta = event.angleDelta().y()
+            
+            # Determine step size based on modifier keys
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                # Shift + wheel: jump by 10 frames
+                step = 10
+            elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                # Ctrl + wheel: jump by 5 frames
+                step = 5
+            else:
+                # Normal wheel: move by 1 frame
+                step = 1
+            
+            # Calculate new frame
+            current_value = self.visualizer.frame_slider.value()
+            if angle_delta < 0:
+                # Scrolling down: go to previous frame(s)
+                new_value = max(0, current_value - step)
+            else:
+                # Scrolling up: go to next frame(s)
+                max_value = self.visualizer.frame_slider.maximum()
+                new_value = min(max_value, current_value + step)
+            
+            # Update slider (which will trigger on_slider_change)
+            self.visualizer.frame_slider.setValue(new_value)
+        
+        super().wheelEvent(event)
+    
     def resizeEvent(self, event):
         """Handle widget resize to update scale factors and rescale image"""
         super().resizeEvent(event)
@@ -892,7 +924,7 @@ class Interact360Visualizer(QMainWindow):
         
         # Play/Pause controls
         play_group = QGroupBox("Playback")
-        play_layout = QVBoxLayout(play_group)
+        play_layout = QHBoxLayout(play_group)
         
         self.play_pause_btn = QPushButton("▶ Play [Space]")
         self.play_pause_btn.clicked.connect(self.toggle_play_pause)
@@ -909,7 +941,7 @@ class Interact360Visualizer(QMainWindow):
         play_layout.addLayout(skip_layout)
         
         # Auto speed adjustment
-        self.auto_speed_cb = QCheckBox("Auto Speed Adjustment")
+        self.auto_speed_cb = QCheckBox("AutoSpeed")
         self.auto_speed_cb.setChecked(True)
         self.auto_speed_cb.toggled.connect(self.toggle_auto_speed_adjustment)
         play_layout.addWidget(self.auto_speed_cb)
@@ -918,88 +950,89 @@ class Interact360Visualizer(QMainWindow):
         
         # Display options
         options_group = QGroupBox("Display Options")
-        options_layout = QVBoxLayout(options_group)
+        options_layout = QGridLayout(options_group)
         
-        self.show_masks_cb = QCheckBox("Show Masks [M]")
+        # Group "Show" checkboxes 3 per row, removing "Show" prefix
+        self.show_masks_cb = QCheckBox("Masks [M]")
         self.show_masks_cb.setChecked(False)
         self.show_masks_cb.toggled.connect(self.toggle_show_masks)
-        options_layout.addWidget(self.show_masks_cb)
+        options_layout.addWidget(self.show_masks_cb, 0, 0)
         
-        self.show_boxes_cb = QCheckBox("Show Bounding Boxes [B]")
+        self.show_boxes_cb = QCheckBox("Bounding Boxes [B]")
         self.show_boxes_cb.setChecked(True)
         self.show_boxes_cb.toggled.connect(self.toggle_show_boxes)
-        options_layout.addWidget(self.show_boxes_cb)
+        options_layout.addWidget(self.show_boxes_cb, 0, 1)
         
-        self.show_track_ids_cb = QCheckBox("Show Track IDs [T]")
+        self.show_track_ids_cb = QCheckBox("Track IDs [T]")
         self.show_track_ids_cb.setChecked(True)
         self.show_track_ids_cb.toggled.connect(self.toggle_show_track_ids)
-        options_layout.addWidget(self.show_track_ids_cb)
+        options_layout.addWidget(self.show_track_ids_cb, 0, 2)
         
-        self.show_interaction_highlights_cb = QCheckBox("Show Interaction Highlights [I]")
+        self.show_interaction_highlights_cb = QCheckBox("Int. Highlights [I]")
         self.show_interaction_highlights_cb.setChecked(True)
         self.show_interaction_highlights_cb.setEnabled(self.interaction_mask is not None)
         self.show_interaction_highlights_cb.toggled.connect(self.toggle_show_interaction_highlights)
-        options_layout.addWidget(self.show_interaction_highlights_cb)
+        options_layout.addWidget(self.show_interaction_highlights_cb, 1, 0)
         
-        self.show_interaction_zone_cb = QCheckBox("Show Interaction Zone [Z]")
+        self.show_interaction_zone_cb = QCheckBox("Int. Zone [Z]")
         self.show_interaction_zone_cb.setChecked(False)
         self.show_interaction_zone_cb.setEnabled(self.interaction_mask is not None)
         self.show_interaction_zone_cb.toggled.connect(self.toggle_show_interaction_zone)
-        options_layout.addWidget(self.show_interaction_zone_cb)
-        
-        self.enable_image_rolling_cb = QCheckBox("Enable Image Rolling")
-        self.enable_image_rolling_cb.setChecked(True)
-        self.enable_image_rolling_cb.toggled.connect(self.toggle_enable_image_rolling)
-        options_layout.addWidget(self.enable_image_rolling_cb)
+        options_layout.addWidget(self.show_interaction_zone_cb, 1, 1)
         
         # Pose visualization options
-        self.show_vitpose_poses_cb = QCheckBox("Show ViTPose Poses [P]")
+        self.show_vitpose_poses_cb = QCheckBox("ViTPose [P]")
         self.show_vitpose_poses_cb.setChecked(False)
         self.show_vitpose_poses_cb.toggled.connect(self.toggle_show_vitpose_poses)
-        options_layout.addWidget(self.show_vitpose_poses_cb)
+        options_layout.addWidget(self.show_vitpose_poses_cb, 1, 2)
         
-        self.show_sapiens_poses_cb = QCheckBox("Show Sapiens Poses [Shift+P]")
+        self.show_sapiens_poses_cb = QCheckBox("Sapiens [Shift+P]")
         self.show_sapiens_poses_cb.setChecked(False)
         self.show_sapiens_poses_cb.toggled.connect(self.toggle_show_sapiens_poses)
-        options_layout.addWidget(self.show_sapiens_poses_cb)
+        options_layout.addWidget(self.show_sapiens_poses_cb, 2, 0)
         
-        self.show_invalid_tracks_cb = QCheckBox("Show Invalid Tracks [V]")
+        self.show_invalid_tracks_cb = QCheckBox("Invalid Tracks [V]")
         self.show_invalid_tracks_cb.setChecked(True)
         self.show_invalid_tracks_cb.toggled.connect(self.toggle_show_invalid_tracks)
-        options_layout.addWidget(self.show_invalid_tracks_cb)
+        options_layout.addWidget(self.show_invalid_tracks_cb, 2, 1)
+        
+        self.enable_image_rolling_cb = QCheckBox("Image Rolling")
+        self.enable_image_rolling_cb.setChecked(True)
+        self.enable_image_rolling_cb.toggled.connect(self.toggle_enable_image_rolling)
+        options_layout.addWidget(self.enable_image_rolling_cb, 2, 2)
         
         # ViTPose minimum score control
-        vitpose_score_layout = QHBoxLayout()
-        vitpose_score_layout.addWidget(QLabel("ViTPose Min Score:"))
-        self.vitpose_score_spin = QSpinBox()
-        self.vitpose_score_spin.setRange(0, 100)
-        self.vitpose_score_spin.setValue(int(self.vitpose_min_score * 100))
-        self.vitpose_score_spin.setSuffix("%")
-        self.vitpose_score_spin.valueChanged.connect(self.update_vitpose_min_score)
-        vitpose_score_layout.addWidget(self.vitpose_score_spin)
-        options_layout.addLayout(vitpose_score_layout)
+        # vitpose_score_layout = QHBoxLayout()
+        # vitpose_score_layout.addWidget(QLabel("ViTPose Min Score:"))
+        # self.vitpose_score_spin = QSpinBox()
+        # self.vitpose_score_spin.setRange(0, 100)
+        # self.vitpose_score_spin.setValue(int(self.vitpose_min_score * 100))
+        # self.vitpose_score_spin.setSuffix("%")
+        # self.vitpose_score_spin.valueChanged.connect(self.update_vitpose_min_score)
+        # vitpose_score_layout.addWidget(self.vitpose_score_spin)
+        # options_layout.addLayout(vitpose_score_layout, 3, 0, 1, 3)
         
         # Sapiens minimum score control
-        sapiens_score_layout = QHBoxLayout()
-        sapiens_score_layout.addWidget(QLabel("Sapiens Min Score:"))
-        self.sapiens_score_spin = QSpinBox()
-        self.sapiens_score_spin.setRange(0, 100)
-        self.sapiens_score_spin.setValue(int(self.sapiens_min_score * 100))
-        self.sapiens_score_spin.setSuffix("%")
-        self.sapiens_score_spin.valueChanged.connect(self.update_sapiens_min_score)
-        sapiens_score_layout.addWidget(self.sapiens_score_spin)
-        options_layout.addLayout(sapiens_score_layout)
+        # sapiens_score_layout = QHBoxLayout()
+        # sapiens_score_layout.addWidget(QLabel("Sapiens Min Score:"))
+        # self.sapiens_score_spin = QSpinBox()
+        # self.sapiens_score_spin.setRange(0, 100)
+        # self.sapiens_score_spin.setValue(int(self.sapiens_min_score * 100))
+        # self.sapiens_score_spin.setSuffix("%")
+        # self.sapiens_score_spin.valueChanged.connect(self.update_sapiens_min_score)
+        # sapiens_score_layout.addWidget(self.sapiens_score_spin)
+        # options_layout.addLayout(sapiens_score_layout, 4, 0, 1, 3)
         
         # Mask opacity control
         mask_opacity_layout = QHBoxLayout()
         mask_opacity_layout.addWidget(QLabel("Mask Opacity:"))
         self.mask_opacity_spin = QSpinBox()
         self.mask_opacity_spin.setRange(0, 100)
-        self.mask_opacity_spin.setValue(30)
+        self.mask_opacity_spin.setValue(self.mask_opacity)
         self.mask_opacity_spin.setSuffix("%")
         self.mask_opacity_spin.valueChanged.connect(self.update_mask_opacity)
         mask_opacity_layout.addWidget(self.mask_opacity_spin)
-        options_layout.addLayout(mask_opacity_layout)
+        options_layout.addLayout(mask_opacity_layout, 5, 0, 1, 3)
         
         layout.addWidget(options_group)
         
@@ -1055,21 +1088,27 @@ class Interact360Visualizer(QMainWindow):
         engagement_group = QGroupBox("Engagement Correction")
         engagement_layout = QVBoxLayout(engagement_group)
         
-        self.engagement_correction_btn = QPushButton("Engagement Correction [E]")
+        # First row: Correction buttons side by side
+        correction_row = QHBoxLayout()
+        self.engagement_correction_btn = QPushButton("Correction [E]")
         self.engagement_correction_btn.clicked.connect(self.open_engagement_correction_dialog)
-        engagement_layout.addWidget(self.engagement_correction_btn)
-        
-        self.set_engagement_zero_btn = QPushButton("Set Engagement to 0 (±15 frames) [Ctrl+X]")
-        self.set_engagement_zero_btn.clicked.connect(self.set_engagement_to_zero)
-        engagement_layout.addWidget(self.set_engagement_zero_btn)
-        
-        self.set_engagement_three_btn = QPushButton("Set Engagement to 3 (+15 frames) [Ctrl+W]")
-        self.set_engagement_three_btn.clicked.connect(self.set_engagement_to_three)
-        engagement_layout.addWidget(self.set_engagement_three_btn)
-        
-        self.set_all_tracks_engagement_btn = QPushButton("Set All Tracks Engagement")
+        correction_row.addWidget(self.engagement_correction_btn)
+
+        self.set_all_tracks_engagement_btn = QPushButton("All Tracks Correction")
         self.set_all_tracks_engagement_btn.clicked.connect(self.open_all_tracks_engagement_dialog)
-        engagement_layout.addWidget(self.set_all_tracks_engagement_btn)
+        correction_row.addWidget(self.set_all_tracks_engagement_btn)
+        engagement_layout.addLayout(correction_row)
+        
+        # Second row: Quick engagement buttons side by side
+        quick_engagement_row = QHBoxLayout()
+        self.set_engagement_zero_btn = QPushButton("To 0 (±15 frames) [Ctrl+X]")
+        self.set_engagement_zero_btn.clicked.connect(self.set_engagement_to_zero)
+        quick_engagement_row.addWidget(self.set_engagement_zero_btn)
+        
+        self.set_engagement_three_btn = QPushButton("To 3 (+15 frames) [Ctrl+W]")
+        self.set_engagement_three_btn.clicked.connect(self.set_engagement_to_three)
+        quick_engagement_row.addWidget(self.set_engagement_three_btn)
+        engagement_layout.addLayout(quick_engagement_row)
         
         track_edit_layout.addWidget(engagement_group)
         
