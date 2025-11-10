@@ -127,8 +127,15 @@ def get_tracks_infos(detections_dict: list, engagement_key: str = "engagement", 
 
 def get_image_shape(detections_dict: list) -> tuple:
     """ Get the shape of the image from the detections dictionary
+
+    Args:
+        detections_dict (list): detections dictionary (actually a list in which each element is associated with one image input)
+
+    Returns:
+        tuple: shape of the image (height, width)
     """
     for image_element in detections_dict:
+        # they should all have the same shape anyway
         image_shape = image_element["image_shape"]
         return image_shape
     return None
