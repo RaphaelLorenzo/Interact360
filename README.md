@@ -4,6 +4,8 @@
 ![ssup](./illustrations/ssup.gif)
 
 ## Install
+Requirements : CUDA equipped GPU with at least 7GB of VRAM.
+
 - Install `ffmpeg` if you dont have it already (for video extraction)
 ```
 sudo apt-get install ffmpeg
@@ -27,21 +29,24 @@ cd ../
 
 Place your video under `./demo/data` here we provide `SalleClubInteract-TC.mp4` (not a part of HUI360 or SSUP-A dataset)
 
+Extract the images (this script uses ffmpeg)
 ```
 python ./process/extract_images.py -i ./demo/data/SalleClubInteract-TC.mp4 -em time -met 60 -w 1
 ```
 
+Run the detection and tracking process
 ```
-python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract -sm tiny -ybs 8 -sibs 8
-```
-
-```
-python ./process/detect_interactions.py -d ./demo/output/SalleClubInteract
+python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract-TC -sm tiny -ybs 8 -sibs 8
 ```
 
-Then you can see the result in the visualizer !
+Detect the interactions using the default mask
 ```
-python visualize.py -d ./demo/output
+python ./process/detect_interactions.py -d ./demo/output/SalleClubInteract-TC
+```
+
+Then you can see the results in the visualizer
+```
+python visualize.py -d ./demo/output -rn SalleClubInteract-TC
 ```
 
 

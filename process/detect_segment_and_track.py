@@ -1051,14 +1051,14 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         image_decomposition_positions = ["left", "front", "right", "back"]
 
         # ======== YOLO Detections ========
-        for image_idx in tqdm(range(0, len(images_list), args.yolo_batch_size), desc="Processing input images (detection with YOLO)"):
+        for image_idx in tqdm(range(0, len(images_list)), desc="Processing input images (detection with YOLO)"):
             
             if image_idx % args.track_initialization_skip_n_images != 0:
                 current_image_detections = {"image_file": os.path.basename(images_list[image_idx]), "detections": []}
                 yolo_detections_output.append(current_image_detections)
                 continue
             
-            image_files_batch = images_list[image_idx:image_idx+args.yolo_batch_size]
+            image_files_batch = [images_list[image_idx]] # batch size is unused
 
             # Batch output variables
             batch_list = []

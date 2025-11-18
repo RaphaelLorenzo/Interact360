@@ -729,7 +729,7 @@ class Interact360Visualizer(QMainWindow):
         
         # Play/Pause functionality
         self.is_playing = False
-        self.play_skip = 7
+        self.play_skip = 1
         self.play_timer = QTimer()
         self.play_timer.timeout.connect(self.play_next_frame)
         self.auto_speed_adjustment = True  # Enable automatic speed adjustment by default
@@ -2273,10 +2273,10 @@ class Interact360Visualizer(QMainWindow):
                 continue
             
             for det in detections:
-                # Check for big mask (>100,000 pixels)
+                # Check for big mask (>50,000 pixels)
                 if "mask_size" in det:
                     mask_size = det.get("mask_size", 0)
-                    if mask_size > 100000:
+                    if mask_size > 50000:
                         return True
                 
                 # Check for engaged track (engagement_level == 3)
