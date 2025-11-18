@@ -29,7 +29,13 @@ Place your video under `./demo/data` here we provide `SalleClubInteract-TC.mp4` 
 
 ```
 python ./process/extract_images.py -i ./demo/data/SalleClubInteract-TC.mp4 -em time -met 60 -w 1
+```
+
+```
 python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract -sm tiny -ybs 8 -sibs 8
+```
+
+```
 python ./process/detect_interactions.py -d ./demo/output/SalleClubInteract
 ```
 
@@ -50,6 +56,19 @@ python visualize.py -d ./demo/output
 In all scripts `-w` is used to specify the number of workers to use when things are parallelized, by default `-w` is `0` and scripts will use all cores, or half of the cores detected.
 
 </details>
+
+
+
+
+<details>
+<summary>Optimized inference</summary>
+
+The option `-vos` enable the use optimized inference with `torch.compile` for the image encoder in SAM2-1.
+
+The option `-b16` enable the use of `bfloat16` checkpoints for Sapiens pose extraction (only available on some GPUs, and with versions of PyTorch that are compatible with the checkpoints)
+
+</details>
+
 
 
 

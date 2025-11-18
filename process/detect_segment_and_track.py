@@ -13,7 +13,7 @@ from ultralytics import YOLO
 
 here = os.path.dirname(__file__)
 sys.path.append(os.path.join(here, '../'))
-sys.path.append(os.path.join(here))
+# sys.path.append(os.path.join(here))
 
 from sam2.build_sam import build_sam2_camera_predictor, build_sam2
 from sam2.sam2_camera_predictor import SAM2CameraPredictor
@@ -62,6 +62,8 @@ COLORS_SEQUENCE_BGR = [(98, 170, 174), (200, 150, 168), (213, 208, 44), (191, 14
             (43, 248, 163), (38, 20, 240), (59, 191, 20), (142, 8, 82), (219, 88, 31), 
             (37, 147, 24), (83, 137, 140), (218, 35, 175), (94, 237, 138), (35, 91, 70), 
             (7, 55, 87), (223, 77, 210), (173, 146, 250), (1, 131, 67), (62, 12, 215)]  
+
+UPDATED_INTERACT_ZONE_PROMPT = None # global variable to store the updated interact zone prompt for the next episode
 
 def get_iou_torch(track_mask, local_mask):
     assert(track_mask.dtype == torch.bool), "Track mask must be a boolean tensor got {}".format(track_mask.dtype)
@@ -527,8 +529,428 @@ def filter_isolated_detections(detections, window_size = 5, min_element_in_windo
     return detections, filtered_infos
 
 
-UPDATED_INTERACT_ZONE_PROMPT = None # global variable to store the updated interact zone prompt for the next episode
+### Display functions ###
+def draw_text_on_image(
+    image: np.ndarray,
+    text: str,
+    position: tuple,
+    color: tuple,
+    font_size: float = 1.0,
+    text_outline: bool = False,
+    text_outline_color: tuple = (255, 255, 255),
+    text_outline_width: int = 2,
+    centered: bool = False,
+    rectangle_background: bool = False, 
+    rectangle_background_opacity: float = 0.5,
+    rectangle_background_padding: int = 10,
+    rectangle_background_color: tuple = (0, 0, 0),
+    rectangle_outline: bool = False,
+    rectangle_outline_color: tuple = (255, 255, 255),
+    rectangle_outline_width: int = 2
+) -> np.ndarray:
+    """
+    Draws text and its optional effects on the image using cv2.
+    """
+    overlay = image.copy()
+    output = image.copy()
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = font_size
+    thickness = 2
 
+    # Get text size
+    text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
+    text_width, text_height = text_size
+
+    # Set position
+    x, y = position
+    if centered:
+        x = int(x - text_width // 2)
+        y = int(y + text_height // 2)
+
+    # Rectangle background
+    if rectangle_background:
+        rect_x1 = x - rectangle_background_padding
+        rect_y1 = y - text_height - rectangle_background_padding
+        rect_x2 = x + text_width + rectangle_background_padding
+        rect_y2 = y + rectangle_background_padding
+
+        # Clip coords to image bounds
+        rect_x1 = max(rect_x1, 0)
+        rect_y1 = max(rect_y1, 0)
+        rect_x2 = min(rect_x2, image.shape[1])
+        rect_y2 = min(rect_y2, image.shape[0])
+
+        cv2.rectangle(
+            overlay, 
+            (rect_x1, rect_y1), (rect_x2, rect_y2), 
+            rectangle_background_color, 
+            thickness=-1
+        )
+        cv2.addWeighted(overlay, rectangle_background_opacity, output, 1 - rectangle_background_opacity, 0, output)
+
+        if rectangle_outline:
+            cv2.rectangle(
+                output, 
+                (rect_x1, rect_y1), (rect_x2, rect_y2), 
+                rectangle_outline_color, 
+                thickness=rectangle_outline_width
+            )
+
+    # Draw text outline
+    if text_outline:
+        for dx in range(-text_outline_width, text_outline_width + 1):
+            for dy in range(-text_outline_width, text_outline_width + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                cv2.putText(
+                    output, text, (x + dx, y + dy), font, font_scale, 
+                    text_outline_color, thickness + 2, cv2.LINE_AA
+                )
+
+    # Draw main text
+    cv2.putText(
+        output, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA
+    )
+    return output
+    
+def display_full_image_and_subimages(args, episode, image_idx : int, image : np.ndarray, image_left : np.ndarray, image_front : np.ndarray, image_right : np.ndarray, image_back : np.ndarray):
+    """
+    Display the original full image and the original region images.
+    """
+    
+    image_show = image.copy()
+    image_show = cv2.cvtColor(image_show, cv2.COLOR_BGR2RGB)
+    if args.save_displayed:
+        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "full_image")):
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "full_image"))
+        full_image_save = image_show.copy()
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "full_image", f"full_image_{image_idx:06d}.jpg"), full_image_save)
+        
+    image_show = cv2.resize(image_show, (image_show.shape[1]//2, image_show.shape[0]//2))
+    cv2.imshow("Original full image", image_show)
+    key = cv2.waitKey(int(1000/15))
+    if key == ord('q') or key == 27:
+        exit(0)
+    
+    # draw the valid zones of each subimage (the center of the image, if a topleft detection 
+    # falls outside of it we will not use it so it will be processed another camera)
+    image_left = image_left.astype(np.float32) / 255.0
+    image_left[:, :image_left.shape[1]//4, :] *= 0.5
+    image_left[:, image_left.shape[1]//4*3:, :] *= 0.5
+
+    image_front = image_front.astype(np.float32) / 255.0
+    image_front[:, :image_front.shape[1]//4, :] *= 0.5
+    image_front[:, image_front.shape[1]//4*3:, :] *= 0.5
+
+    image_right = image_right.astype(np.float32) / 255.0            
+    image_right[:, :image_right.shape[1]//4, :] *= 0.5
+    image_right[:, image_right.shape[1]//4*3:, :] *= 0.5
+    
+    image_back = image_back.astype(np.float32) / 255.0
+    image_back[:, :image_back.shape[1]//4, :] *= 0.5
+    image_back[:, image_back.shape[1]//4*3:, :] *= 0.5
+    
+    stacked = np.concatenate([image_left, image_front, image_right, image_back], axis=0)
+    # save image if requested
+    if args.save_displayed:
+        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "stacked")):
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked"))
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "left"))
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "front"))
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "right"))
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "back"))
+
+        image_left = cv2.cvtColor((image_left.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+        image_front = cv2.cvtColor((image_front.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+        image_right = cv2.cvtColor((image_right.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+        image_back = cv2.cvtColor((image_back.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "left", f"left_{image_idx:06d}.jpg"), image_left)
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "front", f"front_{image_idx:06d}.jpg"), image_front)
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "right", f"right_{image_idx:06d}.jpg"), image_right)
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "back", f"back_{image_idx:06d}.jpg"), image_back)
+    
+    stacked = cv2.resize(stacked, (stacked.shape[1]//4, stacked.shape[0]//4))
+    stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
+    cv2.imshow("Original region images", stacked)
+    key = cv2.waitKey(int(1000/15))
+    if key == ord('q') or key == 27:
+        exit(0)
+
+
+def draw_detection_on_subimage(args, subimage : np.ndarray, xmin : int, ymin : int, xmax : int, ymax : int, class_name : str, confidence : float):
+    subimage_width = subimage.shape[1]
+    color = (0, 255, 0)
+    if (xmin < subimage_width//4 or xmin > 3 * (subimage_width//4)):
+        # out of scope
+        color = (255, 255, 0)
+    if confidence.item() < args.yolo_confidence_threshold:
+        # low confidence
+        color = (255, 0, 0)
+    cv2.rectangle(subimage, (int(xmin), int(ymin)), (int(xmax), int(ymax)), color, 8)
+    cv2.putText(subimage, class_name, (int(xmin), int(ymin)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    cv2.circle(subimage, (int(xmin), int(ymin)), 16, color, -1)
+    return subimage
+
+
+def display_full_image_and_subimages_with_detections(args, 
+                                                    episode, 
+                                                    image_idx : int, 
+                                                    image : np.ndarray,
+                                                    subimages : list,
+                                                    detections : list):
+
+    
+    subimage_width = subimages[0].shape[1]
+    subimage_height = subimages[0].shape[0]
+    subimage_canvas = np.ones((subimage_height*2, subimage_width*2+int((5/4)*subimage_width), 3), dtype=np.float32)
+    
+    subimage_canvas[:subimage_height, :subimage_width, :] = subimages[0]
+    subimage_canvas[subimage_height:, int((3/4)*subimage_width):int((3/4)*subimage_width)+subimage_width, :] = subimages[1]
+    subimage_canvas[:subimage_height, int((6/4)*subimage_width):int((6/4)*subimage_width)+subimage_width, :] = subimages[2]
+    subimage_canvas[subimage_height:, int((9/4)*subimage_width):int((9/4)*subimage_width)+subimage_width, :] = subimages[3]
+    
+    if args.save_displayed:
+        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections")):
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections"))
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections", f"stacked_with_detections_{image_idx:06d}.jpg"), cv2.cvtColor(subimage_canvas, cv2.COLOR_BGR2RGB))
+        
+    subimage_canvas = cv2.resize(subimage_canvas, (subimage_canvas.shape[1]//4, subimage_canvas.shape[0]//4))
+    subimage_canvas = cv2.cvtColor(subimage_canvas, cv2.COLOR_BGR2RGB)
+    
+        
+    # draw box
+    original_image_show = image.copy()
+    for detection in detections:
+        color = (0, 255, 0)
+        if detection["confidence"] >= args.yolo_confidence_threshold:
+            cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color, 2)
+            cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    
+    img_show = original_image_show.copy()
+    if args.save_displayed:
+        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections")):
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections"))
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections", f"full_image_with_detections_{image_idx:06d}.jpg"), cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB))
+        
+    desired_width = subimage_canvas.shape[1]
+    img_show_height_with_aspect_ratio = desired_width * img_show.shape[0] // img_show.shape[1]
+    img_show = (img_show/255.0).astype(np.float32)
+    img_show = cv2.resize(img_show, (desired_width, img_show_height_with_aspect_ratio))
+    img_show = cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB)
+    
+    # stack with subimage_canvas
+    stacked = np.concatenate([subimage_canvas, img_show], axis=0)
+    
+    cv2.imshow("Initial detections", stacked)
+    key = cv2.waitKey(int(1000/15))
+    if key == ord('q') or key == 27:
+        exit(0)    
+                      
+                 
+def draw_detection_on_full_image(args, main_image_show : np.ndarray, 
+                                 yolo_detection_idx : int, 
+                                 xmin : int,
+                                 ymin : int,
+                                 xmax : int,
+                                 ymax : int,
+                                 validity : str, 
+                                 confidence : float,
+                                 detection_width_prop_full_image : float,
+                                 detection_height_prop_full_image : float):
+    
+    color = COLORS_SEQUENCE_BGR[yolo_detection_idx % len(COLORS_SEQUENCE_BGR)]
+    
+    det_text_1 = f"{yolo_detection_idx} | {validity} | {confidence*100:.0f}%"
+    det_text_2 = f"{detection_width_prop_full_image * 100:.2f}% | {detection_height_prop_full_image * 100:.2f}%"
+    # to draw the box even if on both ends of the image
+    if xmax > main_image_show.shape[1]:
+        if xmin > main_image_show.shape[1]:
+            # fully outside
+            cv2.rectangle(main_image_show, (xmin-main_image_show.shape[1], ymin), (xmax-main_image_show.shape[1], ymax), color, 2)
+            cv2.putText(main_image_show, det_text_1, (xmin-main_image_show.shape[1], ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
+            cv2.putText(main_image_show, det_text_2, (xmin-main_image_show.shape[1], ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
+        else:
+            # two sides
+            cv2.rectangle(main_image_show, (xmin, ymin), (main_image_show.shape[1], ymax), color, 2)
+            cv2.rectangle(main_image_show, (0, ymin), (xmax-main_image_show.shape[1], ymax), color, 2)  
+            cv2.putText(main_image_show, det_text_1, (xmin, ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
+            cv2.putText(main_image_show, det_text_2, (xmin, ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
+    else:
+        cv2.rectangle(main_image_show, (xmin, ymin), (xmax, ymax), color, 2)                    
+        cv2.putText(main_image_show, det_text_1, (xmin, ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
+        cv2.putText(main_image_show, det_text_2, (xmin, ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
+
+    return main_image_show
+
+
+def draw_detection_with_kpts_on_mosaic_image(args, 
+                                   image_idx : int,
+                                   image_list_length : int,
+                                   centered_input_image : np.ndarray,
+                                   centered_image_mask : np.ndarray,
+                                   centered_input_box : list,
+                                   yolo_idx : int,
+                                   vitpose_result : dict,
+                                   vitpose_valid_keypoints : int,
+                                   vitpose_valid_keypoints_in_mask : int,
+                                   mask_area_prop_in_centered_image : float):
+
+    color = COLORS_SEQUENCE_BGR[yolo_idx % len(COLORS_SEQUENCE_BGR)]
+    input_image_show = centered_input_image.copy()
+    input_image_show = cv2.cvtColor(input_image_show, cv2.COLOR_RGB2BGR)
+    mask_show = centered_image_mask.cpu().numpy()
+    mask_show = (mask_show * 255.0).astype(np.uint8)
+    mask_show = cv2.cvtColor(mask_show, cv2.COLOR_GRAY2BGR)
+    input_image_show = cv2.addWeighted(input_image_show, 0.3, mask_show, 0.7, 0)
+    input_image_show = cv2.rectangle(input_image_show, (centered_input_box[0], centered_input_box[1]), (centered_input_box[2], centered_input_box[3]), color, 7)
+    
+    cv2.putText(input_image_show, f"Image {image_idx+1} / {image_list_length}, yolo_idx : {yolo_idx}", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 2.0, color, 5)
+    validkpcolor = (0, 255, 0) if vitpose_valid_keypoints > MIN_VITPOSE_VALID and vitpose_valid_keypoints_in_mask > MIN_VITPOSE_VALID_IN_MASK else (0, 0, 255)
+    cv2.putText(input_image_show, f"valid_keypoints : {vitpose_valid_keypoints} / valid_keypoints_in_mask : {vitpose_valid_keypoints_in_mask}", (200, 300), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validkpcolor, 5)
+    validmasksizecolor = (0, 255, 0) if mask_area_prop_in_centered_image > MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE else (0, 0, 255)
+    cv2.putText(input_image_show, f"mask_area : {mask_area_prop_in_centered_image * 100:.2f}%", (200, 400), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validmasksizecolor, 5)
+    for kp, score in zip(vitpose_result["keypoints"], vitpose_result["scores"]):
+        if score < 0.5:
+            cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
+        else:
+            cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
+            
+    return input_image_show
+
+
+def draw_detection_with_kpts_on_full_image(args, 
+                                           main_image_show : np.ndarray, 
+                                           full_image_mask : torch.Tensor, 
+                                           vitpose_keypoints_in_global_image : np.ndarray, 
+                                           vitpose_result : dict,
+                                           yolo_idx : int):
+    
+    color = COLORS_SEQUENCE_BGR[yolo_idx % len(COLORS_SEQUENCE_BGR)]
+    full_image_mask_show = main_image_show.copy()
+    full_image_mask_show[full_image_mask.cpu().numpy()] = 255
+    full_image_mask_show = full_image_mask_show.astype(np.uint8)
+    
+    for kp, score in zip(vitpose_keypoints_in_global_image, vitpose_result["scores"]):
+        if score < 0.5:
+            cv2.circle(full_image_mask_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
+        else:
+            cv2.circle(full_image_mask_show, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
+    
+    main_image_show = cv2.addWeighted(main_image_show, 0.5, full_image_mask_show, 0.5, 0)
+    
+    return main_image_show
+
+
+
+def display_full_image_with_filtering(args, episode, image_idx, main_image_show):
+    # show main image
+    if args.save_displayed:
+        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation")):
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation"))
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation", f"sam2_image_initial_segmentation_{image_idx:06d}.jpg"), main_image_show)
+    
+    main_image_show = cv2.resize(main_image_show, (1920, 960)) # resize for display
+    cv2.imshow("SAM2 Image Initial Segmentation", main_image_show)
+    key = cv2.waitKey(100)
+    if key == ord('q') or key == 27:
+        exit(0)
+        
+        
+def display_mosaic_of_centered_images_with_filtering(args, episode, image_idx, centered_images_show):
+    if args.save_displayed:
+        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "centered_images")):
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "centered_images"))
+        for i in range(min(len(centered_images_show), 16)):
+            cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "centered_images", f"centered_images_{image_idx:06d}_{i:06d}.jpg"), centered_images_show[i])
+    centered_images_show = [cv2.resize(centered_image_show, (480, 480)) for centered_image_show in centered_images_show]
+    mosaic_image_show = np.zeros((1920, 1920, 3), dtype=np.uint8)
+    for i in range(min(len(centered_images_show), 16)):
+        row = i // 4
+        col = i % 4
+        mosaic_image_show[row*480:(row+1)*480, col*480:(col+1)*480, :] = centered_images_show[i]
+        #add thin separations
+        mosaic_image_show[row*480:row*480+10, col*480:(col+1)*480, :] = 0
+        mosaic_image_show[(row+1)*480-10:(row+1)*480, col*480:(col+1)*480, :] = 0
+        mosaic_image_show[row*480:(row+1)*480, col*480:col*480+10, :] = 0
+        mosaic_image_show[row*480:(row+1)*480, (col+1)*480-10:(col+1)*480, :] = 0
+
+    cv2.imshow("Mosaic of centered images", mosaic_image_show)
+    key = cv2.waitKey(100)
+    if key == ord('q') or key == 27:
+        exit(0)
+        
+def display_centered_image_with_mask(args,
+                                     episode,
+                                     following_image_idx,
+                                     following_image_centered,
+                                     centered_image_mask,
+                                     current_sam2_track_id,
+                                     bbox_in_centered_image,
+                                     bbox_width_prop,
+                                     bbox_height_prop,
+                                     mask_area_prop):
+    image_centered_show = following_image_centered.copy()
+    mask_image = image_centered_show.copy()
+    mask_image[centered_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
+    image_centered_show = cv2.addWeighted(image_centered_show, 0.5, mask_image, 0.5, 0)
+    cv2.putText(image_centered_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+    cv2.putText(image_centered_show, f"bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+    cv2.rectangle(image_centered_show, (int(bbox_in_centered_image[0]), int(bbox_in_centered_image[1])), (int(bbox_in_centered_image[2]), int(bbox_in_centered_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+    image_centered_show = cv2.cvtColor(image_centered_show, cv2.COLOR_BGR2RGB)
+    image_centered_show = cv2.resize(image_centered_show, (480, 480))
+    if args.save_displayed:
+        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show")):
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show"))
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show", f"image_centered_show_{following_image_idx:06d}.jpg"), image_centered_show)
+    cv2.imshow("image_centered_show", image_centered_show)
+    key = cv2.waitKey(10)
+    if key == ord('q') or key == 27:
+        exit(0)
+        
+        
+def display_full_image_with_existing_tracked_mask(args,
+                                                  episode,
+                                                  following_image_idx,
+                                                  following_image,
+                                                  full_image_mask,
+                                                  current_sam2_track_id,
+                                                  sam2_detections_output):
+    
+    image_full_show = following_image.copy()
+    mask_image = image_full_show.copy()
+    mask_image[full_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
+    image_full_show = cv2.addWeighted(image_full_show, 0.5, mask_image, 0.5, 0)
+    detections_in_image = sam2_detections_output[following_image_idx]["detections"]
+    for detection in detections_in_image:
+        color_detection = COLORS_SEQUENCE_BGR[detection["track_id"] % len(COLORS_SEQUENCE_BGR)]
+        associated_mask = decode_RLE(detection["mask_rle"], shape = following_image.shape[:2])
+        associated_mask_iou = get_iou_torch(associated_mask, full_image_mask)
+        associated_mask_image = image_full_show.copy()
+        associated_mask_image[associated_mask.cpu().numpy()] = color_detection
+        image_full_show = cv2.addWeighted(image_full_show, 0.5, associated_mask_image, 0.5, 0)
+        # cv2.rectangle(image_full_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color_detection, 2)
+        # cv2.putText(image_full_show, "ID {} (iou = {:.2f}%)".format(detection["track_id"], associated_mask_iou * 100), (int(detection["xmin"]), int(detection["ymin"]-20)), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color_detection, 2)
+    # cv2.putText(image_full_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+    # cv2.putText(image_full_show, f"bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+    # cv2.rectangle(image_full_show, (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), (int(bbox_in_absolute_image[2]), int(bbox_in_absolute_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+    image_full_show = cv2.cvtColor(image_full_show, cv2.COLOR_BGR2RGB)
+                        
+    track_save_debug_dir = os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}" , "images_full")
+    if not os.path.isdir(track_save_debug_dir):
+        os.makedirs(track_save_debug_dir)
+    cv2.imwrite(os.path.join(track_save_debug_dir, f"image_full_{following_image_idx:06d}_at_track_{current_sam2_track_id:03d}.jpg"), image_full_show)
+    
+    if args.save_displayed:
+        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show")):
+            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show"))
+        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show", f"image_full_show_{following_image_idx:06d}_at_track_{current_sam2_track_id:03d}.jpg"), image_full_show)
+    image_full_show = cv2.resize(image_full_show, (960, 480))
+    cv2.imshow("image_full_show", image_full_show)
+    key = cv2.waitKey(10)
+    if key == ord('q') or key == 27:
+        exit(0)
+                            
 def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImagePredictor, vitpose_image_processor: AutoProcessor, vitpose_model: VitPoseForPoseEstimation, episode: str, interact_zone_prompt: list = None):
 
     global UPDATED_INTERACT_ZONE_PROMPT
@@ -573,10 +995,6 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         # ======== YOLO Detections ========
         for image_idx in tqdm(range(0, len(images_list), args.yolo_batch_size), desc="Processing input images (detection with YOLO)"):
             
-            # if os.path.exists("filtered_yolo_detections_output.pkl"):
-            #     print("DEBUG : SKIPPING YOLO DETECTIONS")
-            #     continue
-            
             image_files_batch = images_list[image_idx:image_idx+args.yolo_batch_size]
 
             # Batch output variables
@@ -599,69 +1017,9 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 batch_list.extend([image_left, image_front, image_right, image_back])
                 
                 if args.display:
+                    pass # we dont draw the raw images
+                    # display_full_image_and_subimages(args, episode, image_idx, image, image_left, image_front, image_right, image_back)
                     
-                    image_show = image.copy()
-                    image_show = cv2.cvtColor(image_show, cv2.COLOR_BGR2RGB)
-                    if args.save_displayed:
-                        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "full_image")):
-                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "full_image"))
-                        full_image_save = image_show.copy()
-                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "full_image", f"full_image_{image_idx:06d}.jpg"), full_image_save)
-                        
-                    image_show = cv2.resize(image_show, (image_show.shape[1]//2, image_show.shape[0]//2))
-                    cv2.imshow("full image", image_show)
-                    key = cv2.waitKey(int(1000/15))
-                    if key == ord('q') or key == 27:
-                        exit(0)
-                    
-                    # draw the valid zones of each subimage (the center of the image, if a topleft detection 
-                    # falls outside of it we will not use it so it will be processed another camera)
-                    image_left = image_left.astype(np.float32) / 255.0
-                    image_left[:, :image_left.shape[1]//4, :] *= 0.5
-                    image_left[:, image_left.shape[1]//4*3:, :] *= 0.5
-
-                    image_front = image_front.astype(np.float32) / 255.0
-                    image_front[:, :image_front.shape[1]//4, :] *= 0.5
-                    image_front[:, image_front.shape[1]//4*3:, :] *= 0.5
-
-                    image_right = image_right.astype(np.float32) / 255.0            
-                    image_right[:, :image_right.shape[1]//4, :] *= 0.5
-                    image_right[:, image_right.shape[1]//4*3:, :] *= 0.5
-                    
-                    image_back = image_back.astype(np.float32) / 255.0
-                    image_back[:, :image_back.shape[1]//4, :] *= 0.5
-                    image_back[:, image_back.shape[1]//4*3:, :] *= 0.5
-                    
-                    stacked = np.concatenate([image_left, image_front, image_right, image_back], axis=0)
-                    # save image if requested
-                    if args.save_displayed:
-                        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "stacked")):
-                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked"))
-                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "left"))
-                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "front"))
-                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "right"))
-                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "back"))
-
-                        image_left = cv2.cvtColor((image_left.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
-                        image_front = cv2.cvtColor((image_front.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
-                        image_right = cv2.cvtColor((image_right.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
-                        image_back = cv2.cvtColor((image_back.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
-
-                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "left", f"left_{image_idx:06d}.jpg"), image_left)
-                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "front", f"front_{image_idx:06d}.jpg"), image_front)
-                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "right", f"right_{image_idx:06d}.jpg"), image_right)
-                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "back", f"back_{image_idx:06d}.jpg"), image_back)
-
-                        # stacked_save = (stacked.copy() * 255.0).astype(np.uint8)
-                        # cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", f"stacked_{image_idx:06d}.jpg"), cv2.cvtColor(stacked_save, cv2.COLOR_BGR2RGB))
-                    
-                    stacked = cv2.resize(stacked, (stacked.shape[1]//4, stacked.shape[0]//4))
-                    stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
-                    cv2.imshow("stacked", stacked)
-                    key = cv2.waitKey(int(1000/15))
-                    if key == ord('q') or key == 27:
-                        exit(0)
-                    # batch_list.append(stacked)
                 
             # Run YOLO detection on the batch
             batch_detections = detection_model(batch_list, verbose=False, device = video_predictor.device) # results of len args.yolo_batch_size * 4
@@ -708,23 +1066,13 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         if class_name != "person":
                             continue
                         
-                        # if confidence.item() < args.yolo_confidence_threshold:
-                        #     continue
-                        
                         xmin = box[0].item()
                         ymin = box[1].item()
                         xmax = box[2].item()
                         ymax = box[3].item()
                         
                         if args.display:
-                            color = (0, 255, 0)
-                            if (xmin < subimage_width//4 or xmin > 3 * (subimage_width//4)):
-                                color = (255, 255, 0)
-                            if confidence.item() < args.yolo_confidence_threshold:
-                                color = (255, 0, 0)
-                            cv2.rectangle(subimage, (int(xmin), int(ymin)), (int(xmax), int(ymax)), color, 8)
-                            cv2.putText(subimage, class_name, (int(xmin), int(ymin)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                            cv2.circle(subimage, (int(xmin), int(ymin)), 16, color, -1)
+                            subimage = draw_detection_on_subimage(args, subimage, xmin, ymin, xmax, ymax, class_name, confidence)
                         
                         if xmin < subimage_width//4 or xmin > 3 * (subimage_width//4):
                             # do not consider "edge detections" they will be processed in another camera
@@ -754,58 +1102,19 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                                                         "confidence": confidence.item(),
                                                                         "validity": "valid" if confidence.item() > args.yolo_confidence_threshold else "low_conf"})
                 
-                if args.display:
-                    stacked = np.concatenate([subimage for subimage in subimages], axis=0)
-                    if args.save_displayed:
-                        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections")):
-                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections"))
-                        # stacked_save = (stacked.copy() * 255.0).astype(np.uint8)
-                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections", f"stacked_with_detections_{image_idx:06d}.jpg"), cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB))
-                    stacked = cv2.resize(stacked, (stacked.shape[1]//4, stacked.shape[0]//4))
-                    stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
-                    cv2.imshow("stacked with detections", stacked)
-                    key = cv2.waitKey(int(1000/15))
-                    if key == ord('q') or key == 27:
-                        exit(0)
-                    # batch_list.append(stacked)
                     
                 # Append the detection element to the output of YOLO detections
                 yolo_detections_output.append(current_image_detections)
-
+    
                 if args.display:
-                    # FOR DEBUGGING
-                    # draw box
-                    original_image_show = original_image.copy()
+                    display_full_image_and_subimages_with_detections(args, episode, image_idx, image, subimages, current_image_detections["detections"])
                     
-                    for detection in current_image_detections["detections"]:
-                        color = (0, 255, 0)
-                        if detection["confidence"] >= args.yolo_confidence_threshold:
-                            cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color, 2)
-                            cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                    
-                    img_show = original_image_show.copy()
-                    if args.save_displayed:
-                        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections")):
-                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections"))
-                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections", f"full_image_with_detections_{image_idx:06d}.jpg"), cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB))
-                    img_show = cv2.resize(img_show, (img_show.shape[1]//2, img_show.shape[0]//2))
-                    img_show = cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB)
-                    cv2.imshow("full image with detections", img_show)
-                    key = cv2.waitKey(int(1000/15))
-                    if key == ord('q') or key == 27:
-                        exit(0)
-                    # cv2.destroyAllWindows()
     
     if args.interact_zone_tracking != "":
         filtered_yolo_detections_output = yolo_detections_output
     else:
         filtered_yolo_detections_output = []
         for image_idx, image_file in tqdm(enumerate(images_list), total = len(images_list), desc="Processing input images (image segmentation and first filtering)"):
-            
-            
-            # if os.path.exists("filtered_yolo_detections_output.pkl"):
-            #     print("DEBUG : SKIPPING FILTERING")
-            #     continue
             
             # skip images for track initialization !
             if image_idx % args.track_initialization_skip_n_images != 0:
@@ -826,8 +1135,8 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
             if args.display:
                 centered_images_show = []
                 main_image_show = image.copy()
-                main_image_show = cv2.cvtColor(main_image_show, cv2.COLOR_RGB2BGR)
-                main_image_show = cv2.putText(main_image_show, f"Image {image_idx+1} / {len(images_list)}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+                # main_image_show = cv2.cvtColor(main_image_show, cv2.COLOR_RGB2BGR)
+                # main_image_show = cv2.putText(main_image_show, f"Image {image_idx+1} / {len(images_list)}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
 
             # create a list of valid detections images and boxes centered for the current image, to split it into batches
             valid_detections_images_centered_for_current_image = []
@@ -842,27 +1151,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 validity = yolo_detection["validity"]
                 confidence = yolo_detection["confidence"]
                 if args.display:
-                    color = COLORS_SEQUENCE_BGR[yolo_detection_idx % len(COLORS_SEQUENCE_BGR)]
-                    
-                    det_text_1 = f"{yolo_detection_idx} | {validity} | {confidence*100:.0f}%"
-                    det_text_2 = f"{detection_width_prop_full_image * 100:.2f}% | {detection_height_prop_full_image * 100:.2f}%"
-                    # to draw the box even if on both ends of the image
-                    if xmax > main_image_show.shape[1]:
-                        if xmin > main_image_show.shape[1]:
-                            # fully outside
-                            cv2.rectangle(main_image_show, (xmin-main_image_show.shape[1], ymin), (xmax-main_image_show.shape[1], ymax), color, 2)
-                            cv2.putText(main_image_show, det_text_1, (xmin-main_image_show.shape[1], ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
-                            cv2.putText(main_image_show, det_text_2, (xmin-main_image_show.shape[1], ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
-                        else:
-                            # two sides
-                            cv2.rectangle(main_image_show, (xmin, ymin), (main_image_show.shape[1], ymax), color, 2)
-                            cv2.rectangle(main_image_show, (0, ymin), (xmax-main_image_show.shape[1], ymax), color, 2)  
-                            cv2.putText(main_image_show, det_text_1, (xmin, ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
-                            cv2.putText(main_image_show, det_text_2, (xmin, ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
-                    else:
-                        cv2.rectangle(main_image_show, (xmin, ymin), (xmax, ymax), color, 2)                    
-                        cv2.putText(main_image_show, det_text_1, (xmin, ymin - 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
-                        cv2.putText(main_image_show, det_text_2, (xmin, ymin - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 3)
+                    main_image_show = draw_detection_on_full_image(args, main_image_show, yolo_detection_idx, xmin, ymin, xmax, ymax, validity, confidence, detection_width_prop_full_image, detection_height_prop_full_image)  
 
                 # skip detection if not valid already
                 if validity != "valid":
@@ -950,41 +1239,10 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                 vitpose_kp_in_mask[kpidx] = 1
 
                     if args.display:
-                        color = COLORS_SEQUENCE_BGR[yolo_idx % len(COLORS_SEQUENCE_BGR)]
-                        input_image_show = centered_input_image.copy()
-                        input_image_show = cv2.cvtColor(input_image_show, cv2.COLOR_RGB2BGR)
-                        mask_show = centered_image_mask.cpu().numpy()
-                        mask_show = (mask_show * 255.0).astype(np.uint8)
-                        mask_show = cv2.cvtColor(mask_show, cv2.COLOR_GRAY2BGR)
-                        input_image_show = cv2.addWeighted(input_image_show, 0.3, mask_show, 0.7, 0)
-                        input_image_show = cv2.rectangle(input_image_show, (centered_input_box[0], centered_input_box[1]), (centered_input_box[2], centered_input_box[3]), color, 7)
-                        
-                        # cv2.putText(input_image_show, f"Image {image_idx+1} / {len(images_list)}, batch {batch_idx+1} / {n_batch_for_image}, yolo_idx : {yolo_idx}", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 2.0, color, 5)
-                        validkpcolor = (0, 255, 0) if vitpose_valid_keypoints > MIN_VITPOSE_VALID and vitpose_valid_keypoints_in_mask > MIN_VITPOSE_VALID_IN_MASK else (0, 0, 255)
-                        # cv2.putText(input_image_show, f"valid_keypoints : {vitpose_valid_keypoints} / valid_keypoints_in_mask : {vitpose_valid_keypoints_in_mask}", (200, 300), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validkpcolor, 5)
-                        validmasksizecolor = (0, 255, 0) if mask_area_prop_in_centered_image > MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE else (0, 0, 255)
-                        # cv2.putText(input_image_show, f"mask_area : {mask_area_prop_in_centered_image * 100:.2f}%", (200, 400), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validmasksizecolor, 5)
-                        for kp, score in zip(vitpose_result["keypoints"], vitpose_result["scores"]):
-                            if score < 0.5:
-                                cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
-                            else:
-                                cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
-                        
+                        input_image_show = draw_detection_with_kpts_on_mosaic_image(args, image_idx, len(images_list), centered_input_image.copy(), centered_image_mask, centered_input_box, yolo_idx, vitpose_result, vitpose_valid_keypoints, vitpose_valid_keypoints_in_mask, mask_area_prop_in_centered_image)
                         centered_images_show.append(input_image_show)
+                        main_image_show = draw_detection_with_kpts_on_full_image(args, main_image_show, full_image_mask, vitpose_keypoints_in_global_image, vitpose_result, yolo_idx)
 
-                        full_image_mask_show = main_image_show.copy()
-                        full_image_mask_show[full_image_mask.cpu().numpy()] = 255
-                        full_image_mask_show = full_image_mask_show.astype(np.uint8)
-                        
-                        for kp, score in zip(vitpose_keypoints_in_global_image, vitpose_result["scores"]):
-                            if score < 0.5:
-                                cv2.circle(full_image_mask_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
-                            else:
-                                cv2.circle(full_image_mask_show, (int(kp[0]), int(kp[1])), 5, (0, 255, 0), -1)
-                        
-                        main_image_show = cv2.addWeighted(main_image_show, 0.5, full_image_mask_show, 0.5, 0)
-                        
-                        
                     valid_detections_processed_for_current_image[yolo_idx] = {"mask_rle_in_global_image": full_image_mask_rle,
                                                                                 "mask_area_prop_in_centered_image": mask_area_prop_in_centered_image,
                                                                                 "mask_pixels_in_global_image": full_image_mask.sum(),
@@ -1027,48 +1285,10 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
             filtered_yolo_detections_output.append({"image_file": image_file, "detections": filtered_yolo_detections_output_current_detections})
             
             if args.display:
-                
-                # show main image
-                if args.save_displayed:
-                    if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation")):
-                        os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation"))
-                    cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation", f"sam2_image_initial_segmentation_{image_idx:06d}.jpg"), main_image_show)
-                
-                main_image_show = cv2.resize(main_image_show, (1920, 960)) # resize for display
-                cv2.imshow("SAM2 Image Initial Segmentation", main_image_show)
-                key = cv2.waitKey(100)
-                if key == ord('q') or key == 27:
-                    exit(0)
-                    
+                display_full_image_with_filtering(args, episode, image_idx, main_image_show)
                 # show a mosaic of up to 16 images centered
-                if args.save_displayed:
-                    if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "centered_images")):
-                        os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "centered_images"))
-                    for i in range(min(len(centered_images_show), 16)):
-                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "centered_images", f"centered_images_{image_idx:06d}_{i:06d}.jpg"), centered_images_show[i])
-                centered_images_show = [cv2.resize(centered_image_show, (480, 480)) for centered_image_show in centered_images_show]
-                mosaic_image_show = np.zeros((1920, 1920, 3), dtype=np.uint8)
-                for i in range(min(len(centered_images_show), 16)):
-                    row = i // 4
-                    col = i % 4
-                    mosaic_image_show[row*480:(row+1)*480, col*480:(col+1)*480, :] = centered_images_show[i]
-                    #add thin separations
-                    mosaic_image_show[row*480:row*480+10, col*480:(col+1)*480, :] = 0
-                    mosaic_image_show[(row+1)*480-10:(row+1)*480, col*480:(col+1)*480, :] = 0
-                    mosaic_image_show[row*480:(row+1)*480, col*480:col*480+10, :] = 0
-                    mosaic_image_show[row*480:(row+1)*480, (col+1)*480-10:(col+1)*480, :] = 0
-
-                cv2.imshow("Mosaic of centered images", mosaic_image_show)
-                key = cv2.waitKey(100)
-                if key == ord('q') or key == 27:
-                    exit(0)
-        
-        # if os.path.exists("filtered_yolo_detections_output.pkl"):
-        #     filtered_yolo_detections_output = pickle.load(open("filtered_yolo_detections_output.pkl", "rb"))
-        #     print("LOADED FILTERED YOLO DETECTIONS OUTPUT FROM PICKLE")
-        # else:
-        #     pickle.dump(filtered_yolo_detections_output, open("filtered_yolo_detections_output.pkl", "wb"))
-        
+                display_mosaic_of_centered_images_with_filtering(args, episode, image_idx, centered_images_show)
+                
     assert(len(filtered_yolo_detections_output) == len(images_list)), "Number of filtered detections and images should be the same got {} and {}".format(len(filtered_yolo_detections_output), len(images_list))
     
     # ======== SAM2 Segmentation and Tracking ========
@@ -1275,9 +1495,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                 matching_sam2_track = detection_comp["track_id"]
                                 matching_sam2_track_detection_idx = detection_comp_idx
                                 break
-                    
-                    # TODO : compare with YOLO and reprompt with keypoints (if it seems to be a good idea...)
-                    
+                                        
                     # If it matches with an existing SAM2 track, break
                     if matching_sam2_track is not None:
                         prWarning(f"[{episode}] Matching SAM2 track {matching_sam2_track} (idx {matching_sam2_track_detection_idx}) found while tracking with SAM2 track id {current_sam2_track_id} at image {following_image_idx}, do not pursue tracking from this detection (iou_boxes = {iou_boxes * 100:.2f}%, iou_masks = {iou_masks * 100:.2f}%, prop_of_mask_in_mask_comp = {prop_of_mask_in_mask_comp * 100:.2f}%)")
@@ -1295,62 +1513,27 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
 
                     if args.display:
                         # draw centered image
-                        image_centered_show = following_image_centered.copy()
-                        mask_image = image_centered_show.copy()
-                        mask_image[centered_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
-                        image_centered_show = cv2.addWeighted(image_centered_show, 0.5, mask_image, 0.5, 0)
-                        cv2.putText(image_centered_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
-                        cv2.putText(image_centered_show, f"bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
-                        cv2.rectangle(image_centered_show, (int(bbox_in_centered_image[0]), int(bbox_in_centered_image[1])), (int(bbox_in_centered_image[2]), int(bbox_in_centered_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
-                        image_centered_show = cv2.cvtColor(image_centered_show, cv2.COLOR_BGR2RGB)
-                        image_centered_show = cv2.resize(image_centered_show, (480, 480))
-                        hostname = socket.gethostname()
-                        if "raphael" in hostname:
-                            if args.save_displayed:
-                                if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show")):
-                                    os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show"))
-                                cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show", f"image_centered_show_{following_image_idx:06d}.jpg"), image_centered_show)
-                            cv2.imshow("image_centered_show", image_centered_show)
-                            key = cv2.waitKey(10)
-                            if key == ord('q') or key == 27:
-                                exit(0)
-                        
+                        display_centered_image_with_mask(args,
+                                                        episode,
+                                                        following_image_idx,
+                                                        following_image_centered,
+                                                        centered_image_mask,
+                                                        current_sam2_track_id,
+                                                        bbox_in_centered_image,
+                                                        bbox_width_prop,
+                                                        bbox_height_prop,
+                                                        mask_area_prop)
+
+                    
                         # draw full image
-                        image_full_show = following_image.copy()
-                        mask_image = image_full_show.copy()
-                        mask_image[full_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
-                        image_full_show = cv2.addWeighted(image_full_show, 0.5, mask_image, 0.5, 0)
-                        detections_in_image = sam2_detections_output[following_image_idx]["detections"]
-                        for detection in detections_in_image:
-                            color_detection = COLORS_SEQUENCE_BGR[detection["track_id"] % len(COLORS_SEQUENCE_BGR)]
-                            associated_mask = decode_RLE(detection["mask_rle"], shape = following_image.shape[:2])
-                            associated_mask_iou = get_iou_torch(associated_mask, full_image_mask)
-                            associated_mask_image = image_full_show.copy()
-                            associated_mask_image[associated_mask.cpu().numpy()] = color_detection
-                            image_full_show = cv2.addWeighted(image_full_show, 0.5, associated_mask_image, 0.5, 0)
-                            # cv2.rectangle(image_full_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color_detection, 2)
-                            # cv2.putText(image_full_show, "ID {} (iou = {:.2f}%)".format(detection["track_id"], associated_mask_iou * 100), (int(detection["xmin"]), int(detection["ymin"]-20)), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color_detection, 2)
-                        # cv2.putText(image_full_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
-                        # cv2.putText(image_full_show, f"bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
-                        # cv2.rectangle(image_full_show, (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), (int(bbox_in_absolute_image[2]), int(bbox_in_absolute_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
-                        image_full_show = cv2.cvtColor(image_full_show, cv2.COLOR_BGR2RGB)
-                                            
-                        track_save_debug_dir = os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}" , "images_full")
-                        if not os.path.isdir(track_save_debug_dir):
-                            os.makedirs(track_save_debug_dir)
-                        cv2.imwrite(os.path.join(track_save_debug_dir, f"image_full_{following_image_idx:06d}_at_track_{current_sam2_track_id:03d}.jpg"), image_full_show)
-                        
-                        hostname = socket.gethostname()
-                        if "raphael" in hostname:
-                            if args.save_displayed:
-                                if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show")):
-                                    os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show"))
-                                cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show", f"image_full_show_{following_image_idx:06d}_at_track_{current_sam2_track_id:03d}.jpg"), image_full_show)
-                            image_full_show = cv2.resize(image_full_show, (960, 480))
-                            cv2.imshow("image_full_show", image_full_show)
-                            key = cv2.waitKey(10)
-                            if key == ord('q') or key == 27:
-                                exit(0)
+                        display_full_image_with_existing_tracked_mask(args,
+                                                                        episode,
+                                                                        following_image_idx,
+                                                                        following_image,
+                                                                        full_image_mask,
+                                                                        current_sam2_track_id,
+                                                                        sam2_detections_output)
+
                 
                 # Increment the current SAM2 track id before next tracking
                 current_sam2_track_id += 1
