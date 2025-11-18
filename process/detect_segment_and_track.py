@@ -536,6 +536,7 @@ def draw_text_on_image(
     position: tuple,
     color: tuple,
     font_size: float = 1.0,
+    font_thickness: int = 2,
     text_outline: bool = False,
     text_outline_color: tuple = (255, 255, 255),
     text_outline_width: int = 2,
@@ -555,7 +556,7 @@ def draw_text_on_image(
     output = image.copy()
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = font_size
-    thickness = 2
+    thickness = font_thickness
 
     # Get text size
     text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
@@ -628,7 +629,7 @@ def display_full_image_and_subimages(args, episode, image_idx : int, image : np.
         
     image_show = cv2.resize(image_show, (image_show.shape[1]//2, image_show.shape[0]//2))
     cv2.imshow("Original full image", image_show)
-    key = cv2.waitKey(int(1000/15))
+    key = cv2.waitKey(1)
     if key == ord('q') or key == 27:
         exit(0)
     
@@ -673,7 +674,7 @@ def display_full_image_and_subimages(args, episode, image_idx : int, image : np.
     stacked = cv2.resize(stacked, (stacked.shape[1]//4, stacked.shape[0]//4))
     stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
     cv2.imshow("Original region images", stacked)
-    key = cv2.waitKey(int(1000/15))
+    key = cv2.waitKey(int(1))
     if key == ord('q') or key == 27:
         exit(0)
 
@@ -703,12 +704,19 @@ def display_full_image_and_subimages_with_detections(args,
     
     subimage_width = subimages[0].shape[1]
     subimage_height = subimages[0].shape[0]
-    subimage_canvas = np.ones((subimage_height*2, subimage_width*2+int((5/4)*subimage_width), 3), dtype=np.float32)
-    
-    subimage_canvas[:subimage_height, :subimage_width, :] = subimages[0]
-    subimage_canvas[subimage_height:, int((3/4)*subimage_width):int((3/4)*subimage_width)+subimage_width, :] = subimages[1]
-    subimage_canvas[:subimage_height, int((6/4)*subimage_width):int((6/4)*subimage_width)+subimage_width, :] = subimages[2]
-    subimage_canvas[subimage_height:, int((9/4)*subimage_width):int((9/4)*subimage_width)+subimage_width, :] = subimages[3]
+    subimage_canvas = np.ones((subimage_height*2, int((10/4)*subimage_width), 3), dtype=np.float32)
+    subimages_text = ["Left", "Front", "Right", "Back"]
+    modified_subimages = []
+    for subimage, text in zip(subimages, subimages_text):
+        # draw a border around
+        subimage = cv2.rectangle(subimage, (0, 0), (subimage.shape[1]-1, subimage.shape[0]-1), (50, 50, 50), 5)
+        subimage = draw_text_on_image(subimage, text, (30, 150), (255, 255, 255), 5, 5)
+        modified_subimages.append(subimage)
+        
+    subimage_canvas[:subimage_height, :subimage_width, :] = modified_subimages[0]
+    subimage_canvas[subimage_height:, int((2/4)*subimage_width):int((2/4)*subimage_width)+subimage_width, :] = modified_subimages[1]
+    subimage_canvas[:subimage_height, int((4/4)*subimage_width):int((4/4)*subimage_width)+subimage_width, :] = modified_subimages[2]
+    subimage_canvas[subimage_height:, int((6/4)*subimage_width):int((6/4)*subimage_width)+subimage_width, :] = modified_subimages[3]
     
     if args.save_displayed:
         if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections")):
@@ -733,17 +741,23 @@ def display_full_image_and_subimages_with_detections(args,
             os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections"))
         cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections", f"full_image_with_detections_{image_idx:06d}.jpg"), cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB))
         
-    desired_width = subimage_canvas.shape[1]
-    img_show_height_with_aspect_ratio = desired_width * img_show.shape[0] // img_show.shape[1]
+    full_image_width_resized = int(8/10 * (subimage_canvas.shape[1]))
+    img_show_height_with_aspect_ratio = full_image_width_resized * img_show.shape[0] // img_show.shape[1]
     img_show = (img_show/255.0).astype(np.float32)
-    img_show = cv2.resize(img_show, (desired_width, img_show_height_with_aspect_ratio))
+    img_show = cv2.resize(img_show, (full_image_width_resized, img_show_height_with_aspect_ratio))
     img_show = cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB)
     
-    # stack with subimage_canvas
-    stacked = np.concatenate([subimage_canvas, img_show], axis=0)
+    # canvas for image
+    image_canvas = np.ones((img_show_height_with_aspect_ratio, subimage_canvas.shape[1], 3), dtype=np.float32)
+    image_canvas[:, :full_image_width_resized, :] = img_show
     
-    cv2.imshow("Initial detections", stacked)
-    key = cv2.waitKey(int(1000/15))
+    # stack with subimage_canvas
+    stacked = np.concatenate([subimage_canvas, image_canvas], axis=0)
+    
+    stacked_show = cv2.resize(stacked, (stacked.shape[1]//2, stacked.shape[0]//2))
+    
+    cv2.imshow("Initial detections (YOLO)", stacked_show)
+    key = cv2.waitKey(1)
     if key == ord('q') or key == 27:
         exit(0)    
                       
@@ -850,9 +864,10 @@ def display_full_image_with_filtering(args, episode, image_idx, main_image_show)
             os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation"))
         cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation", f"sam2_image_initial_segmentation_{image_idx:06d}.jpg"), main_image_show)
     
-    main_image_show = cv2.resize(main_image_show, (1920, 960)) # resize for display
-    cv2.imshow("SAM2 Image Initial Segmentation", main_image_show)
-    key = cv2.waitKey(100)
+    main_image_show = cv2.cvtColor(main_image_show, cv2.COLOR_BGR2RGB)
+    main_image_show = cv2.resize(main_image_show, (960, 480)) # resize for display
+    cv2.imshow("SAM2 Image Initial Segmentation + ViTPose", main_image_show)
+    key = cv2.waitKey(1)
     if key == ord('q') or key == 27:
         exit(0)
         
@@ -864,10 +879,10 @@ def display_mosaic_of_centered_images_with_filtering(args, episode, image_idx, c
         for i in range(min(len(centered_images_show), 16)):
             cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "centered_images", f"centered_images_{image_idx:06d}_{i:06d}.jpg"), centered_images_show[i])
     centered_images_show = [cv2.resize(centered_image_show, (480, 480)) for centered_image_show in centered_images_show]
-    mosaic_image_show = np.zeros((1920, 1920, 3), dtype=np.uint8)
+    mosaic_image_show = np.zeros((960, 960, 3), dtype=np.uint8)
     for i in range(min(len(centered_images_show), 16)):
-        row = i // 4
-        col = i % 4
+        row = i // 2
+        col = i % 2
         mosaic_image_show[row*480:(row+1)*480, col*480:(col+1)*480, :] = centered_images_show[i]
         #add thin separations
         mosaic_image_show[row*480:row*480+10, col*480:(col+1)*480, :] = 0
@@ -875,8 +890,8 @@ def display_mosaic_of_centered_images_with_filtering(args, episode, image_idx, c
         mosaic_image_show[row*480:(row+1)*480, col*480:col*480+10, :] = 0
         mosaic_image_show[row*480:(row+1)*480, (col+1)*480-10:(col+1)*480, :] = 0
 
-    cv2.imshow("Mosaic of centered images", mosaic_image_show)
-    key = cv2.waitKey(100)
+    cv2.imshow("Mosaic of centered images with SAM2 and ViTPose", mosaic_image_show)
+    key = cv2.waitKey(1)
     if key == ord('q') or key == 27:
         exit(0)
         
@@ -891,6 +906,7 @@ def display_centered_image_with_mask(args,
                                      bbox_height_prop,
                                      mask_area_prop):
     image_centered_show = following_image_centered.copy()
+
     mask_image = image_centered_show.copy()
     mask_image[centered_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
     image_centered_show = cv2.addWeighted(image_centered_show, 0.5, mask_image, 0.5, 0)
@@ -903,8 +919,8 @@ def display_centered_image_with_mask(args,
         if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show")):
             os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show"))
         cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show", f"image_centered_show_{following_image_idx:06d}.jpg"), image_centered_show)
-    cv2.imshow("image_centered_show", image_centered_show)
-    key = cv2.waitKey(10)
+    cv2.imshow("Centered Image with Mask (SAM2)", image_centered_show)
+    key = cv2.waitKey(1)
     if key == ord('q') or key == 27:
         exit(0)
         
@@ -915,9 +931,34 @@ def display_full_image_with_existing_tracked_mask(args,
                                                   following_image,
                                                   full_image_mask,
                                                   current_sam2_track_id,
-                                                  sam2_detections_output):
+                                                  following_image_xmin,
+                                                  sam2_detections_output,
+                                                  sam2_latency):
     
     image_full_show = following_image.copy()
+    image_full_show = (image_full_show/255.0).astype(np.float32)
+    # darken based on following_image_xmin
+    centered_image_width = following_image.shape[1] // 2
+    if following_image_xmin < 0:
+        following_image_xmin += following_image.shape[1]
+        
+    if following_image_xmin > following_image.shape[1]:
+        # completely outside
+        following_image_xmin_wrapped = following_image_xmin - following_image.shape[1]
+        image_full_show[:, 0:following_image_xmin_wrapped,:] *= 0.5
+        image_full_show[:, following_image_xmin_wrapped+centered_image_width:,:] *= 0.5
+    elif following_image_xmin < following_image.shape[1] and following_image_xmin > following_image.shape[1] - centered_image_width:
+        # a bit on both sides
+        following_image_xmax = following_image_xmin + centered_image_width
+        following_image_xmax_wrapped = following_image_xmax - following_image.shape[1]
+        image_full_show[:, following_image_xmax_wrapped:following_image_xmin,:] *= 0.5
+    else:
+        # completely in
+        image_full_show[:, :following_image_xmin,:] *= 0.5
+        image_full_show[:, following_image_xmin+centered_image_width:,:] *= 0.5
+    
+    image_full_show = (image_full_show*255.0).astype(np.uint8)
+    
     mask_image = image_full_show.copy()
     mask_image[full_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
     image_full_show = cv2.addWeighted(image_full_show, 0.5, mask_image, 0.5, 0)
@@ -931,6 +972,23 @@ def display_full_image_with_existing_tracked_mask(args,
         image_full_show = cv2.addWeighted(image_full_show, 0.5, associated_mask_image, 0.5, 0)
         # cv2.rectangle(image_full_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color_detection, 2)
         # cv2.putText(image_full_show, "ID {} (iou = {:.2f}%)".format(detection["track_id"], associated_mask_iou * 100), (int(detection["xmin"]), int(detection["ymin"]-20)), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color_detection, 2)
+    
+    
+    text = f"ID {current_sam2_track_id} (image {following_image_idx})"
+    text += f" | SAM2 (.track): {sam2_latency*1000:.0f}ms"
+    
+    image_full_show = draw_text_on_image(image_full_show, 
+                       text, 
+                       (image_full_show.shape[1]//2, 150), 
+                       (0, 0, 0), 
+                       5.0, 
+                       10, 
+                       centered=True,
+                       rectangle_background=True,
+                       rectangle_background_opacity=0.5,
+                       rectangle_background_padding=50,
+                       rectangle_background_color=COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)])
+    
     # cv2.putText(image_full_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
     # cv2.putText(image_full_show, f"bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
     # cv2.rectangle(image_full_show, (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), (int(bbox_in_absolute_image[2]), int(bbox_in_absolute_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
@@ -946,8 +1004,8 @@ def display_full_image_with_existing_tracked_mask(args,
             os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show"))
         cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show", f"image_full_show_{following_image_idx:06d}_at_track_{current_sam2_track_id:03d}.jpg"), image_full_show)
     image_full_show = cv2.resize(image_full_show, (960, 480))
-    cv2.imshow("image_full_show", image_full_show)
-    key = cv2.waitKey(10)
+    cv2.imshow("Full Image with Existing Tracked Mask (SAM2)", image_full_show)
+    key = cv2.waitKey(1)
     if key == ord('q') or key == 27:
         exit(0)
                             
@@ -994,6 +1052,11 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
 
         # ======== YOLO Detections ========
         for image_idx in tqdm(range(0, len(images_list), args.yolo_batch_size), desc="Processing input images (detection with YOLO)"):
+            
+            if image_idx % args.track_initialization_skip_n_images != 0:
+                current_image_detections = {"image_file": os.path.basename(images_list[image_idx]), "detections": []}
+                yolo_detections_output.append(current_image_detections)
+                continue
             
             image_files_batch = images_list[image_idx:image_idx+args.yolo_batch_size]
 
@@ -1108,7 +1171,9 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     
                 if args.display:
                     display_full_image_and_subimages_with_detections(args, episode, image_idx, image, subimages, current_image_detections["detections"])
-                    
+    
+    if args.display:
+        cv2.destroyAllWindows()
     
     if args.interact_zone_tracking != "":
         filtered_yolo_detections_output = yolo_detections_output
@@ -1291,6 +1356,9 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 
     assert(len(filtered_yolo_detections_output) == len(images_list)), "Number of filtered detections and images should be the same got {} and {}".format(len(filtered_yolo_detections_output), len(images_list))
     
+    if args.display:
+        cv2.destroyAllWindows()
+    
     # ======== SAM2 Segmentation and Tracking ========
     video_predictor_initialized = False
     sam2_detections_output = {} # dict in the form {idx: {"image_file": FILENAME, "detections": [...]}, "idx": ...}, transformed to list before exporting
@@ -1433,7 +1501,8 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     tic = time.time()
                     out_obj_ids, out_mask_logits = video_predictor.track(following_image_centered)
                     tac = time.time()
-                    if args.verbose or args.display:
+                    sam2_latency = tac - tic
+                    if args.verbose:
                         prTimer(f"Track with SAM2", tic, tac)
                     centered_image_mask = (out_mask_logits[0, 0, :, :] > 0.0)
                     centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=ERODE_AND_DILATE_N_PIXELS)
@@ -1513,16 +1582,16 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
 
                     if args.display:
                         # draw centered image
-                        display_centered_image_with_mask(args,
-                                                        episode,
-                                                        following_image_idx,
-                                                        following_image_centered,
-                                                        centered_image_mask,
-                                                        current_sam2_track_id,
-                                                        bbox_in_centered_image,
-                                                        bbox_width_prop,
-                                                        bbox_height_prop,
-                                                        mask_area_prop)
+                        # display_centered_image_with_mask(args,
+                        #                                 episode,
+                        #                                 following_image_idx,
+                        #                                 following_image_centered,
+                        #                                 centered_image_mask,
+                        #                                 current_sam2_track_id,
+                        #                                 bbox_in_centered_image,
+                        #                                 bbox_width_prop,
+                        #                                 bbox_height_prop,
+                        #                                 mask_area_prop)
 
                     
                         # draw full image
@@ -1532,7 +1601,9 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                                                         following_image,
                                                                         full_image_mask,
                                                                         current_sam2_track_id,
-                                                                        sam2_detections_output)
+                                                                        following_image_xmin,
+                                                                        sam2_detections_output,
+                                                                        sam2_latency)
 
                 
                 # Increment the current SAM2 track id before next tracking
