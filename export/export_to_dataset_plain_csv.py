@@ -122,7 +122,7 @@ def get_track_data(detections_dict, track_info, track_first_interaction_index, v
     """ Get the data of a track as pd.DataFrame with each line corresponding to one timestep and the columns being features (keypoints, box coordinates, scores, etc.)
 
     Args:
-        detections_dict (_type_): _description_
+        detections_dict (list): _description_
         track_info (_type_): _description_
         track_first_interaction_index (_type_): _description_
         valid_segments (list): list of contiguous valid segments of the form [(start,length), (start,length), ...] if the track with start and length indexed relatively to the beginning of the track in image indexes
@@ -552,7 +552,7 @@ if __name__ == "__main__":
         args.workers = mp.cpu_count() // 2
     prInfo(f"Using {args.workers} workers")
     
-    assert args.input in ["images", "images_360"], "Invalid input type, expected images or images_360"
+    assert args.input in ["images_360"], "Invalid input type, expected images_360"
     assert os.path.isdir(args.dir), "Directory should exist at {}".format(args.dir)
     
     if args.recordings == "all":
@@ -563,10 +563,7 @@ if __name__ == "__main__":
         
     recordings_list.sort()
     
-    
-    ##### FOR DEBUG
-    recordings_list = recordings_list[2:4]
-    ####
+
     
     # validity check first - parallelized
     prInfo(f"Checking {len(recordings_list)} recordings validity (using {args.workers} workers)")
@@ -640,3 +637,5 @@ if __name__ == "__main__":
             cv2.imwrite(os.path.join(dataset_dir, "background_images", f"{recording}.jpg"), bg_image)
             
     prSuccess(f"Copied background images")
+
+    prSuccess(f"Exported dataset to {dataset_dir}")

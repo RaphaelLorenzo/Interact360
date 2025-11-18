@@ -602,6 +602,12 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     
                     image_show = image.copy()
                     image_show = cv2.cvtColor(image_show, cv2.COLOR_BGR2RGB)
+                    if args.save_displayed:
+                        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "full_image")):
+                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "full_image"))
+                        full_image_save = image_show.copy()
+                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "full_image", f"full_image_{image_idx:06d}.jpg"), full_image_save)
+                        
                     image_show = cv2.resize(image_show, (image_show.shape[1]//2, image_show.shape[0]//2))
                     cv2.imshow("full image", image_show)
                     key = cv2.waitKey(int(1000/15))
@@ -627,6 +633,28 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     image_back[:, image_back.shape[1]//4*3:, :] *= 0.5
                     
                     stacked = np.concatenate([image_left, image_front, image_right, image_back], axis=0)
+                    # save image if requested
+                    if args.save_displayed:
+                        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "stacked")):
+                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked"))
+                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "left"))
+                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "front"))
+                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "right"))
+                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "back"))
+
+                        image_left = cv2.cvtColor((image_left.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+                        image_front = cv2.cvtColor((image_front.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+                        image_right = cv2.cvtColor((image_right.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+                        image_back = cv2.cvtColor((image_back.copy() * 255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+
+                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "left", f"left_{image_idx:06d}.jpg"), image_left)
+                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "front", f"front_{image_idx:06d}.jpg"), image_front)
+                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "right", f"right_{image_idx:06d}.jpg"), image_right)
+                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", "back", f"back_{image_idx:06d}.jpg"), image_back)
+
+                        # stacked_save = (stacked.copy() * 255.0).astype(np.uint8)
+                        # cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked", f"stacked_{image_idx:06d}.jpg"), cv2.cvtColor(stacked_save, cv2.COLOR_BGR2RGB))
+                    
                     stacked = cv2.resize(stacked, (stacked.shape[1]//4, stacked.shape[0]//4))
                     stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
                     cv2.imshow("stacked", stacked)
@@ -728,6 +756,11 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 
                 if args.display:
                     stacked = np.concatenate([subimage for subimage in subimages], axis=0)
+                    if args.save_displayed:
+                        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections")):
+                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections"))
+                        # stacked_save = (stacked.copy() * 255.0).astype(np.uint8)
+                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "stacked_with_detections", f"stacked_with_detections_{image_idx:06d}.jpg"), cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB))
                     stacked = cv2.resize(stacked, (stacked.shape[1]//4, stacked.shape[0]//4))
                     stacked = cv2.cvtColor(stacked, cv2.COLOR_BGR2RGB)
                     cv2.imshow("stacked with detections", stacked)
@@ -751,6 +784,10 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                             cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                     
                     img_show = original_image_show.copy()
+                    if args.save_displayed:
+                        if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections")):
+                            os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections"))
+                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections", f"full_image_with_detections_{image_idx:06d}.jpg"), cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB))
                     img_show = cv2.resize(img_show, (img_show.shape[1]//2, img_show.shape[0]//2))
                     img_show = cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB)
                     cv2.imshow("full image with detections", img_show)
@@ -920,13 +957,13 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         mask_show = (mask_show * 255.0).astype(np.uint8)
                         mask_show = cv2.cvtColor(mask_show, cv2.COLOR_GRAY2BGR)
                         input_image_show = cv2.addWeighted(input_image_show, 0.3, mask_show, 0.7, 0)
-                        input_image_show = cv2.rectangle(input_image_show, (centered_input_box[0], centered_input_box[1]), (centered_input_box[2], centered_input_box[3]), color, 3)
+                        input_image_show = cv2.rectangle(input_image_show, (centered_input_box[0], centered_input_box[1]), (centered_input_box[2], centered_input_box[3]), color, 7)
                         
-                        cv2.putText(input_image_show, f"Image {image_idx+1} / {len(images_list)}, batch {batch_idx+1} / {n_batch_for_image}, yolo_idx : {yolo_idx}", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 2.0, color, 5)
+                        # cv2.putText(input_image_show, f"Image {image_idx+1} / {len(images_list)}, batch {batch_idx+1} / {n_batch_for_image}, yolo_idx : {yolo_idx}", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 2.0, color, 5)
                         validkpcolor = (0, 255, 0) if vitpose_valid_keypoints > MIN_VITPOSE_VALID and vitpose_valid_keypoints_in_mask > MIN_VITPOSE_VALID_IN_MASK else (0, 0, 255)
-                        cv2.putText(input_image_show, f"valid_keypoints : {vitpose_valid_keypoints} / valid_keypoints_in_mask : {vitpose_valid_keypoints_in_mask}", (200, 300), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validkpcolor, 5)
+                        # cv2.putText(input_image_show, f"valid_keypoints : {vitpose_valid_keypoints} / valid_keypoints_in_mask : {vitpose_valid_keypoints_in_mask}", (200, 300), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validkpcolor, 5)
                         validmasksizecolor = (0, 255, 0) if mask_area_prop_in_centered_image > MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE else (0, 0, 255)
-                        cv2.putText(input_image_show, f"mask_area : {mask_area_prop_in_centered_image * 100:.2f}%", (200, 400), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validmasksizecolor, 5)
+                        # cv2.putText(input_image_show, f"mask_area : {mask_area_prop_in_centered_image * 100:.2f}%", (200, 400), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validmasksizecolor, 5)
                         for kp, score in zip(vitpose_result["keypoints"], vitpose_result["scores"]):
                             if score < 0.5:
                                 cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
@@ -992,6 +1029,11 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
             if args.display:
                 
                 # show main image
+                if args.save_displayed:
+                    if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation")):
+                        os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation"))
+                    cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "sam2_image_initial_segmentation", f"sam2_image_initial_segmentation_{image_idx:06d}.jpg"), main_image_show)
+                
                 main_image_show = cv2.resize(main_image_show, (1920, 960)) # resize for display
                 cv2.imshow("SAM2 Image Initial Segmentation", main_image_show)
                 key = cv2.waitKey(100)
@@ -999,6 +1041,11 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     exit(0)
                     
                 # show a mosaic of up to 16 images centered
+                if args.save_displayed:
+                    if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "centered_images")):
+                        os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "centered_images"))
+                    for i in range(min(len(centered_images_show), 16)):
+                        cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "centered_images", f"centered_images_{image_idx:06d}_{i:06d}.jpg"), centered_images_show[i])
                 centered_images_show = [cv2.resize(centered_image_show, (480, 480)) for centered_image_show in centered_images_show]
                 mosaic_image_show = np.zeros((1920, 1920, 3), dtype=np.uint8)
                 for i in range(min(len(centered_images_show), 16)):
@@ -1259,6 +1306,10 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         image_centered_show = cv2.resize(image_centered_show, (480, 480))
                         hostname = socket.gethostname()
                         if "raphael" in hostname:
+                            if args.save_displayed:
+                                if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show")):
+                                    os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show"))
+                                cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}", "image_centered_show", f"image_centered_show_{following_image_idx:06d}.jpg"), image_centered_show)
                             cv2.imshow("image_centered_show", image_centered_show)
                             key = cv2.waitKey(10)
                             if key == ord('q') or key == 27:
@@ -1277,20 +1328,24 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                             associated_mask_image = image_full_show.copy()
                             associated_mask_image[associated_mask.cpu().numpy()] = color_detection
                             image_full_show = cv2.addWeighted(image_full_show, 0.5, associated_mask_image, 0.5, 0)
-                            cv2.rectangle(image_full_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color_detection, 2)
-                            cv2.putText(image_full_show, "ID {} (iou = {:.2f}%)".format(detection["track_id"], associated_mask_iou * 100), (int(detection["xmin"]), int(detection["ymin"]-20)), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color_detection, 2)
-                        cv2.putText(image_full_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
-                        cv2.putText(image_full_show, f"bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
-                        cv2.rectangle(image_full_show, (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), (int(bbox_in_absolute_image[2]), int(bbox_in_absolute_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+                            # cv2.rectangle(image_full_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color_detection, 2)
+                            # cv2.putText(image_full_show, "ID {} (iou = {:.2f}%)".format(detection["track_id"], associated_mask_iou * 100), (int(detection["xmin"]), int(detection["ymin"]-20)), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color_detection, 2)
+                        # cv2.putText(image_full_show, f"ID {current_sam2_track_id} (image {following_image_idx})", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+                        # cv2.putText(image_full_show, f"bbox_width_prop = {bbox_width_prop * 100:.2f}%, bbox_height_prop = {bbox_height_prop * 100:.2f}%, prop_of_mask = {mask_area_prop * 100:.2f}%", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
+                        # cv2.rectangle(image_full_show, (int(bbox_in_absolute_image[0]), int(bbox_in_absolute_image[1])), (int(bbox_in_absolute_image[2]), int(bbox_in_absolute_image[3])), COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)], 2)
                         image_full_show = cv2.cvtColor(image_full_show, cv2.COLOR_BGR2RGB)
                                             
-                        track_save_debug_dir = os.path.join(args.dir, "episodes", episode, "track_debug", "track_{:06d}".format(current_sam2_track_id))
+                        track_save_debug_dir = os.path.join(args.dir, "episodes", episode, "visu", "tracks", f"{current_sam2_track_id:03d}" , "images_full")
                         if not os.path.isdir(track_save_debug_dir):
                             os.makedirs(track_save_debug_dir)
-                        cv2.imwrite(os.path.join(track_save_debug_dir, f"image_full_{following_image_idx:06d}.jpg"), image_full_show)
+                        cv2.imwrite(os.path.join(track_save_debug_dir, f"image_full_{following_image_idx:06d}_at_track_{current_sam2_track_id:03d}.jpg"), image_full_show)
                         
                         hostname = socket.gethostname()
                         if "raphael" in hostname:
+                            if args.save_displayed:
+                                if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show")):
+                                    os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show"))
+                                cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "image_full_show", f"image_full_show_{following_image_idx:06d}_at_track_{current_sam2_track_id:03d}.jpg"), image_full_show)
                             image_full_show = cv2.resize(image_full_show, (960, 480))
                             cv2.imshow("image_full_show", image_full_show)
                             key = cv2.waitKey(10)
@@ -1350,6 +1405,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_keypoints_prompt", "-ukp", action="store_true", default=False, help="Use the keypoints prompt (default: %(default)s)")
     parser.add_argument("--vos_optimized", "-vos", action="store_true", default=False, help="Use the VOS optimized model (default: %(default)s)")
     parser.add_argument("--display", "-disp", action="store_true", default=False, help="Display the detections live (default: %(default)s)")
+    parser.add_argument("--save_displayed", "-sd", action="store_true", default=False, help="Save the displayed images (default: %(default)s)")
     parser.add_argument("--verbose", "-v", action="store_true", default=False, help="Verbose mode (default: %(default)s)")
     parser.add_argument("--interact_zone_tracking", "-izt", type=str, default="", help="Don't track the people but the zone to interact with, give a prompt at the beggining ([xmin, ymin, xmax, ymax] in pixels) and track from there (default: %(default)s)")
     args = parser.parse_args()
