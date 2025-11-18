@@ -43,10 +43,18 @@ python visualize.py -d ./demo/output
 
 ## Additional informations
 
-**Multiprocessing** : in all scripts `-w` is used to specify the number of workers to use when things are parallelized, by default `-w` is `0` and scripts will use all cores, or half of the cores detected.
 
 <details>
-<summary>**Extracting video**</summary>
+<summary>Multiprocessing</summary>
+
+In all scripts `-w` is used to specify the number of workers to use when things are parallelized, by default `-w` is `0` and scripts will use all cores, or half of the cores detected.
+
+</details>
+
+
+
+<details>
+<summary>Extracting video</summary>
 
 **Episodes duration** : use `-em` to set the episode creation method (either `single` i.e. not episode, or `time` i.e. based on a maximum duration, `detection` to create episodes only when people are in front of the camera is not implemented here), use `-met` to set the maximum episode time in seconds
 
@@ -54,8 +62,10 @@ python visualize.py -d ./demo/output
 
 </details>
 
+
+
 <details>
-<summary>**Detection, segmentation and tracking**</summary>
+<summary>Detection, segmentation and tracking</summary>
 
 The process is explained in the publication. Many options are related to the filtering, and other filtering threhsolds are set as variable at the beggining of `detect_segment_and_track.py`
 
@@ -67,8 +77,9 @@ The process is explained in the publication. Many options are related to the fil
 
 
 
+
 <details>
-<summary>**Mask for interaction**</summary>
+<summary>Mask for interaction</summary>
 
 **Fixed interaction zone** : By default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs if you have a fixed interaction zone. 
 
