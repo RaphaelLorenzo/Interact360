@@ -9,15 +9,14 @@
 sudo apt-get install ffmpeg
 ```
 
-- Create a conda environment and install dependencies (install torch accordingly to your CUDA version. Note that to use the `bfloat16` optimized models of Sapiens for A100/H100 you will need `torch==2.3.1` if you don't plan on using this, you can just go with a newer version of `torch`)
+- Create a conda environment and install dependencies
 ```
-conda create --name interact360_env python=3.10
-conda activate interact360_env
-pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
+conda create --name interact360env python=3.10
+conda activate interact360env
 pip install -r requirements.txt
 ```
 
-- Download the checkpoints
+- Download the checkpoints (by default it will download necessary checkpoints for `SAM2.1-Tiny` and `Sapiens-03b`)
 ```
 cd checkpoints
 ./download_ckpts.sh
@@ -26,12 +25,49 @@ cd ../
 
 ## Run
 
-Place your video under `./demo/data` (or use `-i` to change the input video path and `-s` for the ouput saving path, then the appropriate `-d` to run outside of the directory)
+Place your video under `./demo/data` here we provide `SalleClubInteract-TC.mp4` (not a part of HUI360 or SSUP-A dataset)
 
-From a video run these 3 commands to extract images, detect segment and track people inside, and assess if they are interacting 
+```
+python ./process/extract_images.py -i ./demo/data/SalleClubInteract-TC.mp4 -em time -met 60 -w 1
+python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract -sm tiny -ybs 8 -sibs 8
+python ./process/detect_interactions.py -d ./demo/output/SalleClubInteract
+```
+
+Then you can see the result in the visualizer !
+```
+python visualize.py -d ./demo/output
+```
+
+
+
+
+## Additional informations
+
+**Multiprocessing** : in all scripts `-w` is used to specify the number of workers to use when things are parallelized, by default `-w` is `0` and scripts will use all cores, or half of the cores detected.
 
 <details>
+<summary>Extracting video</summary>
 
+**Episodes duration** : use `-em` to set the episode creation method (either `single` i.e. not episode, or `time` i.e. based on a maximum duration, `detection` to create episodes only when people are in front of the camera is not implemented here), use `-met` to set the maximum episode time in seconds
+
+**Other options** : use `-h` to check them
+
+</details>
+
+<details>
+<summary>Detection, segmentation and tracking</summary>
+
+The process is explained in the publication. Many options are related to the filtering, and other filtering threhsolds are set as variable at the beggining of `detect_segment_and_track.py`
+
+- `-ybs` refers to the batch size for YOLO initial detections, it will be multiplied by 4 since all images are subdivided in 4 overlapping regions
+- `-sibs` refers to the batch size for SAM2-Image initial segmentation (it refers to the number of persons segmented simultaneously, but anyway the full images are processed one by one)
+- In the tracking phase, tracks are processed one by one, and a single image at a time 
+
+</details>
+
+
+
+<details>
 <summary>Mask for interaction</summary>
 
 **Fixed interaction zone** : By default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs if you have a fixed interaction zone. 
@@ -42,24 +78,12 @@ python detect_segment_and_track.py -d ./demo/output/SSUP_SAMPLE_0/ -izt 2688,104
 ```
 
 Where `-izt 2688,1042,4585,1919` is the bounding box of the interaction zone in the first image then it will run a full pass of tracking to find the masks of the interaction zone. Then compute the convex hull of these masks. So you need a convex interaction zone, also this way of doing is not preferred because less reliable, a fix interaction zone - relatively to the camera - is better.
-
-
 </details>
 
-
-```
-python ./process/extract_images.py -i ./demo/data/SalleClubInteract.mp4 -em time -met 60
-python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract -sm tiny -ybs 8 -sibs 8
-python ./process/detect_interactions.py -d ./demo/output/SalleClubInteract
-```
-
-Then you can see the result in the visualizer !
-```
-python visualize.py -d ./demo/output
-```
 
 ## Acknoledgment 
 SAM2
 SAM2 Real Time : https://github.com/Gy920/segment-anything-2-real-time
 ViTPose
 Sapiens
+
