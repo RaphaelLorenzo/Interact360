@@ -36,7 +36,7 @@ python ./process/extract_images.py -i ./demo/data/SalleClubInteract-TC.mp4 -em t
 
 Run the detection and tracking process
 ```
-python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract-TC -sm tiny -ybs 8 -sibs 8
+python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract-TC -sm tiny -sibs 8
 ```
 
 Detect the interactions using the default mask

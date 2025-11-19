@@ -697,6 +697,7 @@ def draw_detection_on_subimage(args, subimage : np.ndarray, xmin : int, ymin : i
 def display_full_image_and_subimages_with_detections(args, 
                                                     episode, 
                                                     image_idx : int, 
+                                                    main_image_text : str,
                                                     image : np.ndarray,
                                                     subimages : list,
                                                     detections : list):
@@ -733,14 +734,16 @@ def display_full_image_and_subimages_with_detections(args,
         color = (0, 255, 0)
         if detection["confidence"] >= args.yolo_confidence_threshold:
             cv2.rectangle(original_image_show, (int(detection["xmin"]), int(detection["ymin"])), (int(detection["xmax"]), int(detection["ymax"])), color, 2)
-            cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            # cv2.putText(original_image_show, detection["class_name"], (int(detection["xmin"]), int(detection["ymin"])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     
     img_show = original_image_show.copy()
     if args.save_displayed:
         if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections")):
             os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections"))
         cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "full_image_with_detections", f"full_image_with_detections_{image_idx:06d}.jpg"), cv2.cvtColor(img_show, cv2.COLOR_BGR2RGB))
-        
+
+    img_show  = draw_text_on_image(img_show, main_image_text, (img_show.shape[1]//2, 200), (255, 255, 255), 6, 18, rectangle_background=True, rectangle_background_opacity=0.8, rectangle_background_color=(50, 50, 50), rectangle_background_padding=40, centered=True)
+    
     full_image_width_resized = int(8/10 * (subimage_canvas.shape[1]))
     img_show_height_with_aspect_ratio = full_image_width_resized * img_show.shape[0] // img_show.shape[1]
     img_show = (img_show/255.0).astype(np.float32)
@@ -753,7 +756,6 @@ def display_full_image_and_subimages_with_detections(args,
     
     # stack with subimage_canvas
     stacked = np.concatenate([subimage_canvas, image_canvas], axis=0)
-    
     stacked_show = cv2.resize(stacked, (stacked.shape[1]//2, stacked.shape[0]//2))
     
     cv2.imshow("Initial detections (YOLO)", stacked_show)
@@ -819,11 +821,47 @@ def draw_detection_with_kpts_on_mosaic_image(args,
     input_image_show = cv2.addWeighted(input_image_show, 0.3, mask_show, 0.7, 0)
     input_image_show = cv2.rectangle(input_image_show, (centered_input_box[0], centered_input_box[1]), (centered_input_box[2], centered_input_box[3]), color, 7)
     
-    cv2.putText(input_image_show, f"Image {image_idx+1} / {image_list_length}, yolo_idx : {yolo_idx}", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 2.0, color, 5)
+    # Draw text in top left with background rectangle
+    input_image_show = draw_text_on_image(
+        input_image_show, 
+        f"Image {image_idx+1} / {image_list_length}, yolo_idx : {yolo_idx}", 
+        (input_image_show.shape[1]//2, 150), 
+        color, 
+        font_size=2.0, 
+        font_thickness=5,
+        rectangle_background=True,
+        rectangle_background_opacity=0.5,
+        rectangle_background_color=color,
+        centered=True
+    )
     validkpcolor = (0, 255, 0) if vitpose_valid_keypoints > MIN_VITPOSE_VALID and vitpose_valid_keypoints_in_mask > MIN_VITPOSE_VALID_IN_MASK else (0, 0, 255)
-    cv2.putText(input_image_show, f"valid_keypoints : {vitpose_valid_keypoints} / valid_keypoints_in_mask : {vitpose_valid_keypoints_in_mask}", (200, 300), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validkpcolor, 5)
+    input_image_show = draw_text_on_image(
+        input_image_show, 
+        f"valid_keypoints : {vitpose_valid_keypoints} / valid_keypoints_in_mask : {vitpose_valid_keypoints_in_mask}", 
+        (input_image_show.shape[1]//2, 250), 
+        validkpcolor, 
+        font_size=2.0, 
+        font_thickness=5,
+        rectangle_background=True,
+        rectangle_background_opacity=0.5,
+        rectangle_background_color=validkpcolor,
+        centered=True
+    )
     validmasksizecolor = (0, 255, 0) if mask_area_prop_in_centered_image > MIN_MASK_PIXELS_PROP_OF_CENTERED_IMAGE else (0, 0, 255)
-    cv2.putText(input_image_show, f"mask_area : {mask_area_prop_in_centered_image * 100:.2f}%", (200, 400), cv2.FONT_HERSHEY_SIMPLEX, 2.0, validmasksizecolor, 5)
+    input_image_show = draw_text_on_image(
+        input_image_show, 
+        f"mask_area : {mask_area_prop_in_centered_image * 100:.2f}%", 
+        (input_image_show.shape[1]//2, 350), 
+        validmasksizecolor, 
+        font_size=2.0, 
+        font_thickness=5,
+        rectangle_background=True,
+        rectangle_background_opacity=0.5,
+        rectangle_background_color=validmasksizecolor,
+        centered=True
+    )
+    
+    
     for kp, score in zip(vitpose_result["keypoints"], vitpose_result["scores"]):
         if score < 0.5:
             cv2.circle(input_image_show, (int(kp[0]), int(kp[1])), 5, (0, 0, 255), 2)
@@ -975,14 +1013,14 @@ def display_full_image_with_existing_tracked_mask(args,
     
     
     text = f"ID {current_sam2_track_id} (image {following_image_idx})"
-    text += f" | SAM2 (.track): {sam2_latency*1000:.0f}ms"
+    text += f" | SAM2-{args.sam2_model} (.track): {sam2_latency*1000:.0f}ms"
     
     image_full_show = draw_text_on_image(image_full_show, 
                        text, 
                        (image_full_show.shape[1]//2, 150), 
                        (0, 0, 0), 
-                       5.0, 
-                       10, 
+                       4.0, 
+                       8, 
                        centered=True,
                        rectangle_background=True,
                        rectangle_background_opacity=0.5,
@@ -1085,7 +1123,9 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     
                 
             # Run YOLO detection on the batch
-            batch_detections = detection_model(batch_list, verbose=False, device = video_predictor.device) # results of len args.yolo_batch_size * 4
+            tic = time.time()
+            batch_detections = detection_model(batch_list, verbose=False, device = video_predictor.device) # results of len args.yolo_batch_size * 4, now yolo_batch_size is always 1
+            tac = time.time()
             
             # Rearrange the outputs by original images
             batch_detections = [batch_detections[i:i+4] for i in range(0, len(batch_detections), 4)] # list of list
@@ -1168,9 +1208,9 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     
                 # Append the detection element to the output of YOLO detections
                 yolo_detections_output.append(current_image_detections)
-    
+
                 if args.display:
-                    display_full_image_and_subimages_with_detections(args, episode, image_idx, image, subimages, current_image_detections["detections"])
+                    display_full_image_and_subimages_with_detections(args, episode, image_idx, f"Image {image_idx+1} / {len(images_list)} | YOLO-v11{args.yolo_model_size} {(tac - tic)*1000:.0f}ms", image, subimages, current_image_detections["detections"])
     
     if args.display:
         cv2.destroyAllWindows()
@@ -1653,7 +1693,6 @@ if __name__ == "__main__":
     parser.add_argument("--sam2_model", "-sm", type=str, default="tiny", help="SAM2 model to use (tiny, small, base, large) (default: %(default)s)")
     parser.add_argument("--yolo_model_size", "-ys", type=str, default="x", help="YOLO model size to use (n, s, l, x) (default: %(default)s)")
     parser.add_argument("--yolo_confidence_threshold", "-yct", type=float, default=0.7, help="YOLO confidence threshold (default: %(default)s)")
-    parser.add_argument("--yolo_batch_size", "-ybs", type=int, default=16, help="Batch size for the YOLO detection (default: %(default)s)")
     parser.add_argument("--sam2_image_batch_size", "-sibs", type=int, default=8, help="Batch size for the SAM2 image prediction (default: %(default)s)")
     parser.add_argument("--track_initialization_skip_n_images", "-tisni", type=int, default=5, help="Skip the first n images for track initialization (default: %(default)s)")
     parser.add_argument("--use_keypoints_prompt", "-ukp", action="store_true", default=False, help="Use the keypoints prompt (default: %(default)s)")
