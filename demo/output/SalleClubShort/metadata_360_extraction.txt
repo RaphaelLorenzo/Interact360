@@ -1,3 +1,0 @@
-./demo/data/SalleClubShort.mkv
-15
-1760445500.0
