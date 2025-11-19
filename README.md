@@ -1,8 +1,7 @@
 # Interact360
 
-![alt](illustrations/PapersFigures-WIDER Interact360 Tracking_v3_anonymized.jpg)
+![concept_tracking](illustrations/concept_tracking.jpg)
 
-![Screenshot of a comment on a GitHub issue showing an image, added in the Markdown, of an Octocat smiling and raising a tentacle.](https://myoctocat.com/assets/images/base-octocat.svg)
 
 ## Install
 Requirements : CUDA equipped GPU with at least 7GB of VRAM. 3GB of disk space for checkpoints.
