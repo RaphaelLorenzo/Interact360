@@ -1,6 +1,6 @@
 # Interact360
 
-![concept_tracking](illustrations/PapersFigures-WIDER Interact360 Tracking_v3_anonymized.jpg)
+![alt](illustrations/PapersFigures-WIDER Interact360 Tracking_v3_anonymized.jpg)
 
 ## Install
 Requirements : CUDA equipped GPU with at least 7GB of VRAM. 3GB of disk space for checkpoints.
