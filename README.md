@@ -27,39 +27,39 @@ cd ../
 
 ## Run
 
-Place your video under `./demo/data` here we provide `SalleClubInteract-TC.mp4` (not a part of HUI360 or SSUP-A dataset)
+Place your video under `./demo/data` here we provide `ClubInteract-TCAn.mp4` (not a part of HUI360 or SSUP-A dataset, faces are blurred which may affect the performances)
 
 Extract the images (this script uses ffmpeg)
 ```
-python ./process/extract_images.py -i ./demo/data/SalleClubInteract-TC.mp4 -em time -met 60 -w 1
+python ./process/extract_images.py -i ./demo/data/ClubInteract-TCAn.mp4 -em time -met 60 -w 1
 ```
 
 Run the detection and tracking process
 ```
-python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract-TC -sm base -sibs 8
+python ./process/detect_segment_and_track.py -d ./demo/output/ClubInteract-TCAn -sm base -sibs 8
 
 # With display (slower)
-python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract-TC -sm base -sibs 1 --disp
+python ./process/detect_segment_and_track.py -d ./demo/output/ClubInteract-TCAn -sm base -sibs 1 --disp
 ```
 
 Detect the interactions using the default mask
 ```
-python ./process/detect_interactions.py -d ./demo/output/SalleClubInteract-TC
+python ./process/detect_interactions.py -d ./demo/output/ClubInteract-TCAn
 ```
 
 Extract keypoints with ViTPose (17 keypoints)
 ```
-python ./process/extract_poses_vitpose.py -d ./demo/output/SalleClubInteract-TC
+python ./process/extract_poses_vitpose.py -d ./demo/output/ClubInteract-TCAn
 ```
 
 Extract keypoints with Sapiens (308 keypoints)
 ```
-python ./process/extract_poses_sapiens.py -d ./demo/output/SalleClubInteract-TC
+python ./process/extract_poses_sapiens.py -d ./demo/output/ClubInteract-TCAn
 ```
 
 Then you can see the results in the visualizer
 ```
-python visualize.py -d ./demo/output -rn SalleClubInteract-TC
+python visualize.py -d ./demo/output -rn ClubInteract-TCAn
 ```
 
 

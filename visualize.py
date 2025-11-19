@@ -1312,9 +1312,9 @@ class Interact360Visualizer(QMainWindow):
         
         
         
-        #### JUST here harcoded to process images we cannot move locally
-        if self.args.use_images_from_remote_group_storage:
-            images_dir = images_dir.replace("/media/raphael/hucedisk3/SSUP/FullVideos/", "/home/raphael/group_storage/rlorenzo/SSUP/FullVideos/")
+        #### JUST here harcoded to process images we cannot move locally
+        if self.args.use_images_from_remote_remove_storage:
+            # images_dir = images_dir.replace("/media/XXXXXXXXX/XXXXXXXX/SSUP/FullVideos/", "/home/XXXXXXXX/XXXXXXXX/XXXXXXXX/SSUP/FullVideos/")
             
         self.image_files = self.get_image_files(images_dir)
         
@@ -3081,7 +3081,7 @@ def main():
                        help="Recording name to visualize, if not provided will visualize all recordings in the directory (default: %(default)s)")
     parser.add_argument("--miniatures", "-mini", action="store_true", default=False,
                        help="Use miniature images (4x smaller) from images_360_miniatures_scale_4 (default: %(default)s)")
-    parser.add_argument("--use_images_from_remote_group_storage", "-rgs", action="store_true", default=False,
+    parser.add_argument("--use_images_from_remote_remove_storage", "-rgs", action="store_true", default=False,
                        help="Use images from remote group storage (default: %(default)s)")
     args = parser.parse_args()
     
