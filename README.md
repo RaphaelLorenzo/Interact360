@@ -1,10 +1,7 @@
 # Interact360
 
-![cafet](./illustrations/cafet.gif)
-![ssup](./illustrations/ssup.gif)
-
 ## Install
-Requirements : CUDA equipped GPU with at least 7GB of VRAM.
+Requirements : CUDA equipped GPU with at least 7GB of VRAM. 3GB of disk space for checkpoints.
 
 - Install `ffmpeg` if you dont have it already (for video extraction)
 ```
@@ -36,12 +33,25 @@ python ./process/extract_images.py -i ./demo/data/SalleClubInteract-TC.mp4 -em t
 
 Run the detection and tracking process
 ```
-python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract-TC -sm tiny -sibs 8
+python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract-TC -sm base -sibs 8
+
+# With display (slower)
+python ./process/detect_segment_and_track.py -d ./demo/output/SalleClubInteract-TC -sm base -sibs 1 --disp
 ```
 
 Detect the interactions using the default mask
 ```
 python ./process/detect_interactions.py -d ./demo/output/SalleClubInteract-TC
+```
+
+Extract keypoints with ViTPose (17 keypoints)
+```
+python ./process/extract_poses_vitpose.py -d ./demo/output/SalleClubInteract-TC
+```
+
+Extract keypoints with Sapiens (308 keypoints)
+```
+python ./process/extract_poses_sapiens.py -d ./demo/output/SalleClubInteract-TC
 ```
 
 Then you can see the results in the visualizer
@@ -54,14 +64,20 @@ python visualize.py -d ./demo/output -rn SalleClubInteract-TC
 
 ## Additional informations
 
+<details>
+<summary>Download more checkpoints</summary>
+
+Use `./download_ckpts.sh -c all` to download more sizes of checkpoint
+
+</details>
+
 
 <details>
 <summary>Multiprocessing</summary>
 
-In all scripts `-w` is used to specify the number of workers to use when things are parallelized, by default `-w` is `0` and scripts will use all cores, or half of the cores detected.
+In all scripts `-w` is used to specify the number of workers to use when things are parallelized, by default `-w` is `0` and scripts will use all cores, or half of the cores detected. In ViTPose extraction when multiple episodes are present they are parallelized depending on the available GPU VRAM.
 
 </details>
-
 
 
 
@@ -93,7 +109,6 @@ The option `-b16` enable the use of `bfloat16` checkpoints for Sapiens pose extr
 
 The process is explained in the publication. Many options are related to the filtering, and other filtering threhsolds are set as variable at the beggining of `detect_segment_and_track.py`
 
-- `-ybs` refers to the batch size for YOLO initial detections, it will be multiplied by 4 since all images are subdivided in 4 overlapping regions
 - `-sibs` refers to the batch size for SAM2-Image initial segmentation (it refers to the number of persons segmented simultaneously, but anyway the full images are processed one by one)
 - In the tracking phase, tracks are processed one by one, and a single image at a time 
 

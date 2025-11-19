@@ -376,25 +376,32 @@ def main(args, ep, pose_estimator):
         pose_imgs, pose_imgs_extended_padded_bboxes = [], []
         
         # Parallelize the preprocessing loop using half of available CPUs
-        # Prepare arguments for parallel processing
-        num_workers = max(1, cpu_count() // 2)
+        # Prepare arguments for parallel processing -> removed
+        # num_workers = max(1, cpu_count() // 2)
         input_shape = (sapiens_original_input_shape[1], sapiens_original_input_shape[2])
         mean = [123.5, 116.5, 103.5]
         std = [58.5, 57.0, 57.5]
         
-        process_args = [
-            (k, images_batch[k], bboxes_batch[k], sam2_masks_batch[k], input_shape, mean, std)
-            for k in range(len(bboxes_batch))
-        ]
-        
-        # Process in parallel
-        with Pool(processes=num_workers) as pool:
-            results = pool.map(process_single_image_for_preprocessing, process_args)
-        
-        # Collect results
-        for preprocessed_images, extended_padded_bboxes in results:
+        for k in range(len(bboxes_batch)):
+            preprocessed_images, extended_padded_bboxes = process_single_image_for_preprocessing(
+                (k, images_batch[k], bboxes_batch[k], sam2_masks_batch[k], input_shape, mean, std)
+            )
             pose_imgs.extend(preprocessed_images)
             pose_imgs_extended_padded_bboxes.extend(extended_padded_bboxes)
+        
+        # process_args = [
+        #     (k, images_batch[k], bboxes_batch[k], sam2_masks_batch[k], input_shape, mean, std)
+        #     for k in range(len(bboxes_batch))
+        # ]
+        
+        # # Process in parallel
+        # with Pool(processes=num_workers) as pool:
+        #     results = pool.map(process_single_image_for_preprocessing, process_args)
+        
+        # Collect results
+        # for preprocessed_images, extended_padded_bboxes in results:
+        #     pose_imgs.extend(preprocessed_images)
+        #     pose_imgs_extended_padded_bboxes.extend(extended_padded_bboxes)
         
         ### Compute the number of batches to run for the inference, because of the multiple detections in each sample ###
         n_pose_batches = (len(pose_imgs) + args.batch_size - 1) // args.batch_size
@@ -588,7 +595,6 @@ if __name__ == "__main__":
     parser.add_argument("--num_keypoints", "-n", type=int, default=308)
     parser.add_argument("--sam2_masks", "-sam2", action="store_true", default=False)
     parser.add_argument("--use_bfloat16", "-b16", action="store_true", default=False)
-    parser.add_argument("--ngpu", "-ngpu", type=int, default=0, help="Number of GPUs to use, default 0 means use all GPUs")
 
     args = parser.parse_args()
     
@@ -615,20 +621,10 @@ if __name__ == "__main__":
         images_per_episode[ep] = len(os.listdir(os.path.join(args.dir, "episodes", ep, "images_360")))
         total_number_of_images += images_per_episode[ep]
 
-    # Set the number of GPUs to use depending on the number of episodes and the number of GPUs available
-    if args.ngpu == 0:
-        args.ngpu = torch.cuda.device_count()
-    args.ngpu = min(args.ngpu, len(episodes_list))
-    prInfo("Using {} GPUs".format(args.ngpu))
-        
-    # Display GPU information (but don't initialize models in main process)
-    for gpu_idx in range(args.ngpu):
-        device_properties = torch.cuda.get_device_properties(gpu_idx)
-        print("Will use GPU {} (idx = {}) | name : {} | memory : {:.2f} GB".format(torch.device("cuda", index = gpu_idx), gpu_idx, device_properties.name, device_properties.total_memory / 1024**3))
-        
-    prInfo("Processing episodes : {} (total number of images : {}) | Using {} GPUs".format(", ".join(episodes_list), total_number_of_images, args.ngpu))
+    prInfo("Processing episodes : {} (total number of images : {})".format(", ".join(episodes_list), total_number_of_images))
 
     # Distribute episodes across GPUs to balance the load
+    args.ngpu = 1
     images_divided_per_ngpu = total_number_of_images // args.ngpu
     episodes_per_gpu = {idx: [] for idx in range(args.ngpu)} # dict with {gpu_idx: [episodes...], gpu_idx : [episodes...]}
     current_gpu_idx = 0
@@ -648,82 +644,52 @@ if __name__ == "__main__":
         gpu_images = sum(images_per_episode[ep] for ep in episodes)
         prInfo(f"GPU {gpu_idx}: {len(episodes)} episodes with {gpu_images} images total: {episodes}")
 
-    # Use multiprocessing for multiple GPUs or single process for one GPU
-    if args.ngpu == 1:
-        # Single GPU - run directly without multiprocessing overhead
-        prInfo("Single GPU mode - running directly")
-        
-        # Initialize model for single GPU processing
-        # check if the gpu is a A100
-        if "A100" in torch.cuda.get_device_properties(0).name and args.use_bfloat16:
-            prInfo("Using A100 GPU")
-            
-            if args.num_keypoints == 308:
-                if args.model == "03b":
-                    model_path = os.path.join(here, "..", "checkpoints", "sapiens", "bfloat16", "pose", "checkpoints", "sapiens_0.3b_goliath_best_goliath_AP_573_bfloat16.pt2")
-                elif args.model == "06b":
-                    model_path = os.path.join(here, "..", "checkpoints", "sapiens", "bfloat16", "pose", "checkpoints", "sapiens_0.6b_goliath_best_goliath_AP_609_bfloat16.pt2")
-                elif args.model == "1b":
-                    model_path = os.path.join(here, "..", "checkpoints", "sapiens", "bfloat16", "pose", "checkpoints", "sapiens_1b_goliath_best_goliath_AP_639_bfloat16.pt2")
-                else:
-                    raise NotImplementedError("Only 03b, 06b or 1b model are supported for now")
-            else:
-                raise NotImplementedError("Only 308 keypoints are supported for now")
-        else:
-            prInfo("Using GPU that is not an A100, cannot use bfloat16 anyway")
-            
-            if args.num_keypoints == 308:
-                if args.model == "03b":
-                    model_path = os.path.join(here, "..", "checkpoints", "sapiens", "torchscript", "pose", "checkpoints", "sapiens_0.3b_goliath_best_goliath_AP_573_torchscript.pt2")
-                elif args.model == "06b":
-                    model_path = os.path.join(here, "..", "checkpoints", "sapiens", "torchscript", "pose", "checkpoints", "sapiens_0.6b_goliath_best_goliath_AP_609_torchscript.pt2")
-                elif args.model == "1b":    
-                    model_path = os.path.join(here, "..", "checkpoints", "sapiens", "torchscript", "pose", "checkpoints", "sapiens_1b_goliath_best_goliath_AP_639_torchscript.pt2")
-                else:
-                    raise NotImplementedError("Only 03b, 06b or 1b model are supported for now")
-            else:
-                raise NotImplementedError("Only 308 keypoints are supported for now")
-
-        ### Build the model from a checkpoint file ###
-        use_torchscript = "_torchscript" in model_path
-        pose_estimator = load_model(model_path, use_torchscript=use_torchscript)
-        
-        if not use_torchscript:
-            # bfloat16 case, on A100
-            dtype = torch.bfloat16
-            pose_estimator.to(dtype)
-            pose_estimator = torch.compile(pose_estimator, mode="max-autotune", fullgraph=True)
-        else:
-            pose_estimator = pose_estimator.half()
-            pose_estimator = pose_estimator.to(torch.device("cuda"))
-        
-        processing_loop(args, episodes_per_gpu[0], pose_estimator)
-        prSuccess("Single GPU processing completed!")
-    else:
-        # Multiple GPUs - use multiprocessing
-        prInfo("Multi-GPU mode - using torch multiprocessing")
-        
-        # Set multiprocessing start method to 'spawn' for CUDA compatibility
-        if mp.get_start_method(allow_none=True) != 'spawn':
-            mp.set_start_method('spawn', force=True)
-        
-        # Create and start worker processes
-        processes = []
-        for gpu_idx in range(args.ngpu):
-            if len(episodes_per_gpu[gpu_idx]) > 0:  # Only start process if there are episodes to process
-                p = mp.Process(target=gpu_worker, args=(gpu_idx, episodes_per_gpu[gpu_idx], args))
-                p.start()
-                processes.append(p)
-                prInfo(f"Started process for GPU {gpu_idx}")
-        
-        # Wait for all processes to complete
-        prInfo("Waiting for all GPU processes to complete...")
-        for i, p in enumerate(processes):
-            p.join()
-            if p.exitcode == 0:
-                prSuccess(f"Process {i} completed successfully")
-            else:
-                prError(f"Process {i} failed with exit code {p.exitcode}")
-        
-        prSuccess("All GPU processes completed!")
+    # Single GPU - run directly without multiprocessing overhead
+    prInfo("Single GPU mode - running directly")
     
+    # Initialize model for single GPU processing
+    # check if the gpu is a A100
+    if "A100" in torch.cuda.get_device_properties(0).name and args.use_bfloat16:
+        prInfo("Using A100 GPU")
+        
+        if args.num_keypoints == 308:
+            if args.model == "03b":
+                model_path = os.path.join(here, "..", "checkpoints", "sapiens", "bfloat16", "pose", "checkpoints", "sapiens_0.3b_goliath_best_goliath_AP_573_bfloat16.pt2")
+            elif args.model == "06b":
+                model_path = os.path.join(here, "..", "checkpoints", "sapiens", "bfloat16", "pose", "checkpoints", "sapiens_0.6b_goliath_best_goliath_AP_609_bfloat16.pt2")
+            elif args.model == "1b":
+                model_path = os.path.join(here, "..", "checkpoints", "sapiens", "bfloat16", "pose", "checkpoints", "sapiens_1b_goliath_best_goliath_AP_639_bfloat16.pt2")
+            else:
+                raise NotImplementedError("Only 03b, 06b or 1b model are supported for now")
+        else:
+            raise NotImplementedError("Only 308 keypoints are supported for now")
+    else:
+        prInfo("Using GPU that is not an A100, cannot use bfloat16 anyway")
+        
+        if args.num_keypoints == 308:
+            if args.model == "03b":
+                model_path = os.path.join(here, "..", "checkpoints", "sapiens", "torchscript", "pose", "checkpoints", "sapiens_0.3b_goliath_best_goliath_AP_573_torchscript.pt2")
+            elif args.model == "06b":
+                model_path = os.path.join(here, "..", "checkpoints", "sapiens", "torchscript", "pose", "checkpoints", "sapiens_0.6b_goliath_best_goliath_AP_609_torchscript.pt2")
+            elif args.model == "1b":    
+                model_path = os.path.join(here, "..", "checkpoints", "sapiens", "torchscript", "pose", "checkpoints", "sapiens_1b_goliath_best_goliath_AP_639_torchscript.pt2")
+            else:
+                raise NotImplementedError("Only 03b, 06b or 1b model are supported for now")
+        else:
+            raise NotImplementedError("Only 308 keypoints are supported for now")
+
+    ### Build the model from a checkpoint file ###
+    use_torchscript = "_torchscript" in model_path
+    pose_estimator = load_model(model_path, use_torchscript=use_torchscript)
+    
+    if not use_torchscript:
+        # bfloat16 case, on A100
+        dtype = torch.bfloat16
+        pose_estimator.to(dtype)
+        pose_estimator = torch.compile(pose_estimator, mode="max-autotune", fullgraph=True)
+    else:
+        pose_estimator = pose_estimator.half()
+        pose_estimator = pose_estimator.to(torch.device("cuda"))
+    
+    processing_loop(args, episodes_per_gpu[0], pose_estimator)
+    prSuccess("Single GPU processing completed!")

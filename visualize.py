@@ -681,12 +681,12 @@ class Interact360Visualizer(QMainWindow):
         self.show_boxes = True
         self.show_track_ids = True
         self.show_interaction_highlights = True
-        self.show_interaction_zone = False  # Option to constantly display interaction zone
+        self.show_interaction_zone = True  # Option to constantly display interaction zone
         self.mask_opacity = 70  # Default 70% opacity
         
         # Pose visualization options
-        self.show_vitpose_poses = False
-        self.show_sapiens_poses = False
+        self.show_vitpose_poses = True
+        self.show_sapiens_poses = True
         self.vitpose_min_score = 0.6  # Minimum score for ViTPose keypoints
         self.sapiens_min_score = 0.6  # Minimum score for Sapiens keypoints
         
@@ -975,19 +975,19 @@ class Interact360Visualizer(QMainWindow):
         options_layout.addWidget(self.show_interaction_highlights_cb, 1, 0)
         
         self.show_interaction_zone_cb = QCheckBox("Int. Zone [Z]")
-        self.show_interaction_zone_cb.setChecked(False)
+        self.show_interaction_zone_cb.setChecked(True)
         self.show_interaction_zone_cb.setEnabled(self.interaction_mask is not None)
         self.show_interaction_zone_cb.toggled.connect(self.toggle_show_interaction_zone)
         options_layout.addWidget(self.show_interaction_zone_cb, 1, 1)
         
         # Pose visualization options
         self.show_vitpose_poses_cb = QCheckBox("ViTPose [P]")
-        self.show_vitpose_poses_cb.setChecked(False)
+        self.show_vitpose_poses_cb.setChecked(True)
         self.show_vitpose_poses_cb.toggled.connect(self.toggle_show_vitpose_poses)
         options_layout.addWidget(self.show_vitpose_poses_cb, 1, 2)
         
         self.show_sapiens_poses_cb = QCheckBox("Sapiens [Shift+P]")
-        self.show_sapiens_poses_cb.setChecked(False)
+        self.show_sapiens_poses_cb.setChecked(True)
         self.show_sapiens_poses_cb.toggled.connect(self.toggle_show_sapiens_poses)
         options_layout.addWidget(self.show_sapiens_poses_cb, 2, 0)
         

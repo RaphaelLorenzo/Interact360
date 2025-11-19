@@ -52,7 +52,7 @@ case "$CHECKPOINTS" in
         SELECTED_CHECKPOINTS="sam21t,sam21s,sam21b,sam21l,sapiens03ts,sapiens03b16,sapiens06ts,sapiens06b16,sapiens1bts,sapiens1b16"
         ;;
     "mini")
-        SELECTED_CHECKPOINTS="sam21t,sapiens03ts,sapiens03b16"
+        SELECTED_CHECKPOINTS="sam21t,sam21b,sapiens03ts,sapiens03b16"
         ;;
     "none")
         SELECTED_CHECKPOINTS=""

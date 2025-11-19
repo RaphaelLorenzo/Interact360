@@ -13,7 +13,6 @@ from ultralytics import YOLO
 
 here = os.path.dirname(__file__)
 sys.path.append(os.path.join(here, '../'))
-# sys.path.append(os.path.join(here))
 
 from sam2.build_sam import build_sam2_camera_predictor, build_sam2
 from sam2.sam2_camera_predictor import SAM2CameraPredictor

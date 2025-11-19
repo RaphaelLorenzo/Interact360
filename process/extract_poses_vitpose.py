@@ -16,7 +16,6 @@ from PIL import Image
 from transformers import AutoProcessor, VitPoseForPoseEstimation
 from tqdm import tqdm
 import warnings
-
 warnings.filterwarnings("ignore")
 
 here = os.path.dirname(__file__)
@@ -242,7 +241,7 @@ if __name__ == "__main__":
     parser.add_argument("--dir", "-d", type=str, default="./output/rosbags_2025_03_26_15_25_25")
     parser.add_argument("--episodes", "-e", type=str, default="all")
     parser.add_argument("--workers", "-w", type=int, default=0)
-    parser.add_argument("--batch_size", "-b", type=int, default=16)
+    parser.add_argument("--batch_size", "-b", type=int, default=8)
 
     args = parser.parse_args()
     
