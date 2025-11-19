@@ -1,6 +1,9 @@
 *.mkv
 *.mp4
-*.jpg
+demo/*/*/*/*/*/*.jpg
+demo/*/*/*/*/*/*/*.jpg
+demo/*/*/*/*/*/*/*/*.jpg
+demo/*/*/*/*/*/*/*/*/*.jpg
 __pycache__/
 checkpoints/sam2.1_hiera_tiny.pt
 *.pt

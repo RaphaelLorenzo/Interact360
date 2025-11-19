@@ -1,4 +1,5 @@
 # Interact360
+![concept_tracking](./illustrations/PapersFigures-WIDER Interact360 Tracking_v3_anonymized.jpg)
 
 ## Install
 Requirements : CUDA equipped GPU with at least 7GB of VRAM. 3GB of disk space for checkpoints.
@@ -131,9 +132,42 @@ Where `-izt 2688,1042,4585,1919` is the bounding box of the interaction zone in 
 </details>
 
 
-## Acknoledgment 
-SAM2
-SAM2 Real Time : https://github.com/Gy920/segment-anything-2-real-time
-ViTPose
-Sapiens
+## Acknowledgement 
+- SAM2
+```
+@article{ravi2024sam2,
+  title={SAM 2: Segment Anything in Images and Videos},
+  author={Ravi, Nikhila and Gabeur, Valentin and Hu, Yuan-Ting and Hu, Ronghang and Ryali, Chaitanya and Ma, Tengyu and Khedr, Haitham and R{\"a}dle, Roman and Rolland, Chloe and Gustafson, Laura and Mintun, Eric and Pan, Junting and Alwala, Kalyan Vasudev and Carion, Nicolas and Wu, Chao-Yuan and Girshick, Ross and Doll{\'a}r, Piotr and Feichtenhofer, Christoph},
+  journal={arXiv preprint arXiv:2408.00714},
+  url={https://arxiv.org/abs/2408.00714},
+  year={2024}
+}
+```
+
+- SAM2 Real Time : 
+```
+https://github.com/Gy920/segment-anything-2-real-time
+```
+
+- ViTPose
+```
+@inproceedings{
+  xu2022vitpose,
+  title={Vi{TP}ose: Simple Vision Transformer Baselines for Human Pose Estimation},
+  author={Yufei Xu and Jing Zhang and Qiming Zhang and Dacheng Tao},
+  booktitle={Advances in Neural Information Processing Systems},
+  year={2022},
+}
+```
+
+- Sapiens
+```
+@article{khirodkar2024sapiens,
+  title={Sapiens: Foundation for Human Vision Models},
+  author={Khirodkar, Rawal and Bagautdinov, Timur and Martinez, Julieta and Zhaoen, Su and James, Austin and Selednik, Peter and Anderson, Stuart and Saito, Shunsuke},
+  journal={arXiv preprint arXiv:2408.12569},
+  year={2024}
+}
+```
+
 
