@@ -1314,6 +1314,7 @@ class Interact360Visualizer(QMainWindow):
         
         #### JUST here harcoded to process images we cannot move locally
         if self.args.use_images_from_remote_remove_storage:
+            pass
             # images_dir = images_dir.replace("/media/XXXXXXXXX/XXXXXXXX/SSUP/FullVideos/", "/home/XXXXXXXX/XXXXXXXX/XXXXXXXX/SSUP/FullVideos/")
             
         self.image_files = self.get_image_files(images_dir)
