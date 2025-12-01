@@ -8,38 +8,43 @@ here = os.path.dirname(__file__)
 sys.path.append(os.path.join(here, '../'))
 sys.path.append(os.path.join(here))
 
+import itertools
+import os
+import time
+import warnings
+
+from tqdm import tqdm
+from typing import List, Optional, Sequence, Union
+
+import cv2
+from PIL import Image
+
+import numpy as np
+import json_tricks as json
+
+import torch
+import torch.multiprocessing as mp
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision.transforms.functional import crop
+from torchvision.transforms.functional import resize
+
 from misc.print_utils import *
 from misc.other_utils import *
 from misc.rle_tools import encode_RLE, decode_RLE
 
-import itertools
-import multiprocessing as mp
-import torch.multiprocessing as mp
-import os
-import time
-import warnings
-from argparse import ArgumentParser
-from collections import defaultdict
-from functools import partial
-from multiprocessing import cpu_count, Pool, Process
-from typing import List, Optional, Sequence, Union
+# from argparse import ArgumentParser
+# from collections import defaultdict
+# from functools import partial
+# from multiprocessing import cpu_count, Pool, Process
 
-import cv2
-import json_tricks as json
-import numpy as np
-import torch
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-import torch.nn as nn
-import torch.nn.functional as F
-from sapiens_liter.liter.utils.pose_utils import nms, top_down_affine_transform, udp_decode, udp_decode_torch
+assert DEVICE == torch.device("cuda"), "CUDA is not available"
 
-from tqdm import tqdm
+from sapiens_liter.liter.utils.pose_utils import udp_decode_torch
 
-# from ultralytics import YOLO
 
-from torchvision.transforms.functional import crop
-from torchvision.transforms.functional import resize
-from PIL import Image
+
 
 def crop_resize_and_normalize(orig_img, bboxes_list, sam2_masks_list, sapiens_original_input_shape, mean, std, draw_boxes = True, show_bboxes = False):
     """Preprocess pose images and bboxes."""
@@ -389,19 +394,6 @@ def main(args, ep, pose_estimator):
             pose_imgs.extend(preprocessed_images)
             pose_imgs_extended_padded_bboxes.extend(extended_padded_bboxes)
         
-        # process_args = [
-        #     (k, images_batch[k], bboxes_batch[k], sam2_masks_batch[k], input_shape, mean, std)
-        #     for k in range(len(bboxes_batch))
-        # ]
-        
-        # # Process in parallel
-        # with Pool(processes=num_workers) as pool:
-        #     results = pool.map(process_single_image_for_preprocessing, process_args)
-        
-        # Collect results
-        # for preprocessed_images, extended_padded_bboxes in results:
-        #     pose_imgs.extend(preprocessed_images)
-        #     pose_imgs_extended_padded_bboxes.extend(extended_padded_bboxes)
         
         ### Compute the number of batches to run for the inference, because of the multiple detections in each sample ###
         n_pose_batches = (len(pose_imgs) + args.batch_size - 1) // args.batch_size
