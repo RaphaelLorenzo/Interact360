@@ -17,3 +17,5 @@ PIPELINES.md
 deprecated
 checkpoints/sapiens/*
 TODO.md
+demo/output/*
+demo/data/SSUP_SAMPLE_3.mp4

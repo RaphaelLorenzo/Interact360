@@ -913,11 +913,11 @@ def display_mosaic_of_centered_images_with_filtering(args, episode, image_idx, c
     if args.save_displayed:
         if not os.path.isdir(os.path.join(args.dir, "episodes", episode, "visu", "centered_images")):
             os.makedirs(os.path.join(args.dir, "episodes", episode, "visu", "centered_images"))
-        for i in range(min(len(centered_images_show), 16)):
+        for i in range(min(len(centered_images_show), 32)):
             cv2.imwrite(os.path.join(args.dir, "episodes", episode, "visu", "centered_images", f"centered_images_{image_idx:06d}_{i:06d}.jpg"), centered_images_show[i])
     centered_images_show = [cv2.resize(centered_image_show, (480, 480)) for centered_image_show in centered_images_show]
     mosaic_image_show = np.zeros((960, 960, 3), dtype=np.uint8)
-    for i in range(min(len(centered_images_show), 16)):
+    for i in range(min(len(centered_images_show), 4)):
         row = i // 2
         col = i % 2
         mosaic_image_show[row*480:(row+1)*480, col*480:(col+1)*480, :] = centered_images_show[i]
@@ -970,12 +970,14 @@ def display_full_image_with_existing_tracked_mask(args,
                                                   current_sam2_track_id,
                                                   following_image_xmin,
                                                   sam2_detections_output,
-                                                  sam2_latency):
+                                                  sam2_latency,
+                                                  interact_zone_tracking,
+                                                  full_image_mask_before_convex_hull):
     
     image_full_show = following_image.copy()
     image_full_show = (image_full_show/255.0).astype(np.float32)
     # darken based on following_image_xmin
-    centered_image_width = following_image.shape[1] // 2
+    centered_image_width = following_image.shape[1] // 2 if interact_zone_tracking == "" else 2880 # TODO / WARNING size is hardcoded here !
     if following_image_xmin < 0:
         following_image_xmin += following_image.shape[1]
         
@@ -998,6 +1000,9 @@ def display_full_image_with_existing_tracked_mask(args,
     
     mask_image = image_full_show.copy()
     mask_image[full_image_mask.cpu().numpy()] = COLORS_SEQUENCE_BGR[current_sam2_track_id % len(COLORS_SEQUENCE_BGR)]
+    if full_image_mask_before_convex_hull is not None:
+        mask_image[full_image_mask_before_convex_hull.cpu().numpy()] = (255, 0, 100)
+    
     image_full_show = cv2.addWeighted(image_full_show, 0.5, mask_image, 0.5, 0)
     detections_in_image = sam2_detections_output[following_image_idx]["detections"]
     for detection in detections_in_image:
@@ -1476,7 +1481,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         labels_prompt = None
                 else:
                     # when interact zone tracking is used, we do not need all these checks
-                    image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box, desired_width=2880) # only cropping supported for now
+                    image_centered, box_in_image_centered, centered_image_xmin, _ = get_image_centered_on_detection(image, yolo_detection_box, desired_width=2880) # only cropping supported for now # TODO / WARNING size is hardcoded here !
                     points_prompt = None
                     labels_prompt = None
                     
@@ -1533,7 +1538,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     following_image = np.array(following_image)
                     
                     # Center based on the bounding box of the previous detection
-                    desired_width = 2880 if args.interact_zone_tracking != "" else None
+                    desired_width = 2880 if args.interact_zone_tracking != "" else None # TODO / WARNING size is hardcoded here !
                     following_image_centered, following_box_in_image_centered, following_image_xmin, following_image_xmax = get_image_centered_on_detection(following_image, bbox_in_absolute_image, desired_width=desired_width)
                                         
                     # Find the mask in the following image
@@ -1546,9 +1551,15 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     centered_image_mask = (out_mask_logits[0, 0, :, :] > 0.0)
                     centered_image_mask = erode_and_dilate_mask(centered_image_mask, erode_and_dilate_n_pixels=ERODE_AND_DILATE_N_PIXELS)
                     if args.interact_zone_tracking != "":
+                        if args.display:
+                            centered_image_mask_before_convex_hull = centered_image_mask.clone()
+                        else:
+                            centered_image_mask_before_convex_hull = None
                         # get the convex hull
                         centered_image_mask = get_convex_hull_mask(centered_image_mask)
                         centered_image_mask = erode_mask(centered_image_mask, erode_n_pixels=15)
+                    else:
+                        centered_image_mask_before_convex_hull = None
                         
                     bbox_in_centered_image = get_bounding_box_torch(centered_image_mask)
                     
@@ -1583,7 +1594,12 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                               bbox_in_centered_image[3]] # this box can have negative coordinates or above the image shape
                     full_image_mask = get_full_image_mask(centered_image_mask, following_image_xmin, following_image.shape)
                     full_image_mask_rle = encode_RLE(full_image_mask)
-                    
+                    if centered_image_mask_before_convex_hull is not None and args.display:
+                        # just for display purposes
+                        full_image_mask_before_convex_hull = get_full_image_mask(centered_image_mask_before_convex_hull, following_image_xmin, following_image.shape)
+                    else:
+                        full_image_mask_before_convex_hull = None
+                        
                     # Create the entry in the sam2_detections_output if it does not exist
                     if following_image_idx not in sam2_detections_output:
                         sam2_detections_output[following_image_idx] = {"image_file": following_image_file, "detections": []}
@@ -1642,7 +1658,9 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                                                         current_sam2_track_id,
                                                                         following_image_xmin,
                                                                         sam2_detections_output,
-                                                                        sam2_latency)
+                                                                        sam2_latency,
+                                                                        args.interact_zone_tracking,
+                                                                        full_image_mask_before_convex_hull)
 
                 
                 # Increment the current SAM2 track id before next tracking
@@ -1718,6 +1736,7 @@ if __name__ == "__main__":
         episodes_list = ["{:04d}".format(int(x)) for x in args.episodes.split(",")]
 
     episodes_list.sort()
+    prInfo(f"Processing {len(episodes_list)} episodes : {', '.join(episodes_list)}")
 
     for episode in episodes_list:
         images_path = os.path.join(args.dir, "episodes", episode, "images_360")
@@ -1739,7 +1758,7 @@ if __name__ == "__main__":
         interact_zone_prompt = args.interact_zone_tracking.split(",")
         assert len(interact_zone_prompt) == 4, "Interact zone prompt should be 4 values separated by commas"
         interact_zone_prompt = [int(x) for x in interact_zone_prompt]
-        prInfo(f"Using interact zone prompt : {interact_zone_prompt} for the first image in episode {episode}")
+        prInfo(f"Using interact zone prompt : {interact_zone_prompt} for the first image")
     else:
         interact_zone_prompt = None
     
