@@ -133,6 +133,199 @@ python process/detect_segment_and_track.py -d ./demo/output/SSUP_SAMPLE_0/ -izt 
 Where `-izt 2688,1042,4585,1919` is the bounding box of the interaction zone in the first image then it will run a full pass of tracking to find the masks of the interaction zone. Then compute the convex hull of these masks. So you need a convex interaction zone, also this way of doing is not preferred because less reliable, a fix interaction zone - relatively to the camera - is better.
 </details>
 
+<details>
+<summary>Manual correction tool</summary>
+
+Documentation TBD
+
+</details>
+
+<details>
+<summary>Format and structure</summary>
+
+1. When using `extract_images.py` the images will be extracted as episodes in the specified `--save_dir` (by default `./demo/output/`) in a subdirectory (name determined by the filename of the original video). For example `python ./process/extract_images.py -i ./demo/data/MyPanoVideoName.mp4 -em time -met 60 -w 1 --save_dir /media/jdoe/interactpano/` :
+
+
+```
+/media/jdoe/interactpano/MyPanoVideoName
+.
+├── episodes
+│   ├── 0000
+│   │   └── images_360
+│   └── 0001
+│       └── images_360
+├── episodes.json
+└── metadata_360_extraction.txt
+```
+
+
+A metadata file `episodes.json` will be created and placed at the root of the extraction along with the episodes subdirectory containing metadata about the episode start and end timestamp. It is a list of length equal to the number of extracted episodes.
+
+```
+[
+    {
+        "session": "MyPanoVideoName",
+        "episode": "0000",
+        "start_time": 1763542047.679756,
+        "end_time": 1763542064.8130896
+    },
+    {
+        "session": "MyPanoVideoName",
+        "episode": "0001",
+        "start_time": ...,
+        "end_time": ...
+    },
+    ...
+]
+```
+
+
+2. When using the different steps of processing you will end up with json files, the main one is `sam2_detection_360.json` (if you are using `-izt` option for mobile interaction zone, you will also have `interact_zone_tracking_360.json`). Along the process copies are created you may remove them later to save space.
+
+```
+/media/jdoe/interactpano/MyPanoVideoName
+.
+├── episodes
+│   ├── 0000
+│   │   ├── images_360
+│   │   ├── sam2_detections_360_copy_2025_10_23_16_46_28.json
+│   │   └── sam2_detections_360.json
+│   └── 0001
+│       ├── images_360
+│       ├── sam2_detections_360_copy_2025_10_23_16_40_19.json
+│       └── sam2_detections_360.json
+├── episodes.json
+└── metadata_360_extraction.txt
+```
+
+The structure of the `sam2_detection_360.json` file is the following (after pose extraction). It is a list of length of the number of image files in `images_360` for each image a dict contains some metadata : `"image_file"` (just the filename, that should be its formated timestamp) and `"image_shape"` (`height, width, channels`). For each file a list of `"detections"` (length is the number of person detected and tracked in the image), each detection is dict with the following informations. 
+- `"track_id"` is assigned to each person tracked along the episode.
+- The bounding box coordinates are expressed as `xmin`, `ymin`, `xmax` and `ymax` in pixels. As the 360 image is wrapped, some may exceed the image size (but should not be negative) : pixel `(4283,783)` corresponds to pixel `(443,783)`.
+- `"validity"` flag is assigned (default is `valid`) but it might be corrected in the manual correction tool
+- `"mask_size"` indicates the total number of pixels in the mask
+- `"mask_rle"` is the RLE encoding of the mask as a string of comma separated values, it can be decoded using `decode_RLE` from `misc.rle_tools.py` (using torch tensor format) : `mask = decode_RLE(torch.from_numpy(np.array(det["mask_rle"].split(",")).astype(np.int32)).to(DEVICE), shape = (width, height))`
+- `"engagement_level"` is automatically determined by the interaction detection process and can be corrected from the manual correction tool. `0` corresponds to no engagement, `3` corresponds to interaction (currently happening).
+- `"intersection_pixels"` is the number of pixels intersecting between the person mask and the interesection zone mask (either fixed or mobile). NB : in older versions this was not exported so `"intersection_pixels" : -1` indicates that this information was not saved.
+- `"scores_sapiens_308_03b"` or `"scores_sapiens_308_06b"` is a list of float with lenght 308 that are the confidence scores associated with each keypoint of `"keypoints_sapiens_308_03b"` 
+- `"scores_vitpose"` is a list of float with lenght 17 that are the confidence scores associated with each keypoint of `"keypoints_vitpose"` 
+- `"keypoints_sapiens_308_03b"` or `"keypoints_sapiens_308_06b"` are the keypoints coordinates (in pixels) with the Goliath format of Sapiens, some were extracted using the 03b pose model and others with 06b pose model. 
+- `"keypoints_vitpose"` are the keypoints coordinates (in pixels) with the COCO-17 format of ViTPose.
+The keypoints are expressed as lists of length `308*2` or `17*2` (alternating `x` and `y` coordinates), **note that they are expressed as the pixel position of the joint in the image, so when the box is wrapped around they may end up not being in the box numerically, or showing two parts of the body at the two ends of the image**. 
+If a keypoint is not present it means that these keypoints were not extracted, probably because the track was already labelled as invalid or the box is too small.
+
+```
+[
+  {
+    "image_file": "1970_01_01_02_00_00_000000.jpg",
+    "image_shape": [
+        1920,
+        3840,
+        3
+    ]
+    "detections": [
+      {
+        "track_id": 0,
+        "xmin": 4283,
+        "ymin": 783,
+        "xmax": 4451,
+        "ymax": 1220,
+        "validity": "valid",
+        "mask_size": 44302,
+        "mask_rle": "0,3007221,17,3820,...,13,2687454",
+        "engagement_level": 3,
+        "intersection_pixels": 18545,
+        "keypoints_vitpose": [
+            481,
+            812,
+            ...
+        ],
+        "scores_vitpose": [
+            0.53,
+            ...
+        ],
+        "keypoints_sapiens_308_03b": [
+            498,
+            816,
+            ...
+        ],
+        "scores_sapiens_308_03b": [
+            0.45,
+            ...
+        ]
+      },
+      {
+        "track_id": 4,
+        "xmin": 1253,
+        "ymin": 721,
+        "xmax": 1611,
+        "ymax": 1520,
+        "validity": "invalid",
+        "mask_size": 145304,
+        "mask_rle": "0,8494527,21,4244,...,14,1425546",
+        "engagement_level": 0,
+        "intersection_pixels": 0,
+        "keypoints_vitpose": [
+            1481,
+            812,
+            ...
+        ],
+        "scores_vitpose": [
+            0.43,
+            ...
+        ],
+        "keypoints_sapiens_308_06b": [
+            1498,
+            816,
+            ...
+        ],
+        "scores_sapiens_308_06b": [
+            0.64,
+            ...
+        ]
+      },
+    ]
+  },
+  {
+    "image_file": "1970_01_01_02_00_00_066667.jpg",
+    "image_shape": [
+        1920,
+        3840,
+        3
+    ]
+    "detections": [
+      ...
+    ]
+  },
+  ...
+]
+```
+
+
+
+
+3. Manual correction tool will create a dictionnary indexed by the episode name
+
+{
+    "0000": {
+        "start_time": 1756981067.0,
+        "end_time": 1756981366.9999995,
+        "start_time_formatted": "2025-09-04 12:17:47",
+        "end_time_formatted": "2025-09-04 12:22:47",
+        "flag": "valid,checked"
+    },
+    "0001": {
+        "start_time": 1756981367.0,
+        "end_time": 1756981666.9999995,
+        "start_time_formatted": "2025-09-04 12:22:47",
+        "end_time_formatted": "2025-09-04 12:27:47",
+        "flag": "valid,checked"
+    },
+    ...
+}
+
+</details>
+
+
 
 ## Acknowledgement 
 - SAM2
