@@ -303,8 +303,9 @@ If a keypoint is not present it means that these keypoints were not extracted, p
 
 
 
-3. Manual correction tool will create a dictionnary indexed by the episode name
+3. Manual correction and visualization tool (`visualize.py`) will create a dictionnary indexed by the episode name with the flags of the episodes (valid by default but can be modified in the tool), 
 
+```
 {
     "0000": {
         "start_time": 1756981067.0,
@@ -322,6 +323,28 @@ If a keypoint is not present it means that these keypoints were not extracted, p
     },
     ...
 }
+```
+
+The tools will also create backups when modifying the tracks for example. You will end up with a structure like this :
+
+```
+/media/jdoe/interactpano/MyPanoVideoName
+.
+├── episodes
+│   ├── 0000
+│   │   ├── images_360
+│   │   ├── sam2_detections_360_copy_2025_10_23_16_46_28.json
+│   │   ├── sam2_detections_360_backup_20251023_185128.json
+│   │   └── sam2_detections_360.json
+│   └── 0001
+│       ├── images_360
+│       ├── sam2_detections_360_copy_2025_10_23_16_40_19.json
+│       ├── sam2_detections_360_backup_20251023_193221.json
+│       └── sam2_detections_360.json
+├── episodes.json
+├── episodes_flag.json
+└── metadata_360_extraction.txt
+```
 
 </details>
 
