@@ -83,6 +83,7 @@ for recording_name in recordings_list_episodes_json:
         total_head_rot_mat_popped = 0
         total_mask_file_popped = 0
         total_track_type_popped = 0
+        total_face_mask_rle_popped = 0
         for image_idx in range(len(detections_dict)):
             
             for det_idx in range(len(detections_dict[image_idx]["detections"])):
@@ -115,10 +116,14 @@ for recording_name in recordings_list_episodes_json:
                 if "track_type" in current_det:
                     detections_dict[image_idx]["detections"][det_idx].pop("track_type")
                     total_track_type_popped += 1
-                    
+                
+                if "face_mask_rle" in current_det:
+                    detections_dict[image_idx]["detections"][det_idx].pop("face_mask_rle")
+                    total_face_mask_rle_popped += 1
+                
                 detections_dict[image_idx]["detections"][det_idx]["intersection_pixels"] = -1
             
-        prInfo(f"Engagement : replaced {total_eng_replaced} / added {total_eng_added} engagement levels | Popped {total_face_popped} faces, {total_head_rot_mat_popped} head rot mat, {total_mask_file_popped} mask file keys, {total_track_type_popped} track type keys")
+        prInfo(f"Engagement : replaced {total_eng_replaced} / added {total_eng_added} engagement levels | Popped {total_face_popped} faces, {total_head_rot_mat_popped} head rot mat, {total_mask_file_popped} mask file keys, {total_track_type_popped} track type keys, {total_face_mask_rle_popped} face mask rle keys")
         
         output_detections_dir = os.path.join(recording_output_dir, "episodes", episode_name)
         if not os.path.exists(output_detections_dir):

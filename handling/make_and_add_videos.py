@@ -116,10 +116,10 @@ def process_episode(args_tuple):
     # prSuccess(f"Exported {len(images_360_basenames)} filenames to {filenames_txt_path}")
     
     # Create video from full images
-    # create_video_from_images(images_360_dir, output_episode_dir, "images_360_full.mp4", recording_name, episode_name)
+    create_video_from_images(images_360_dir, output_episode_dir, "images_360_full.mp4", recording_name, episode_name)
     
     # Create video from miniature images
-    create_video_from_images(miniatures_360_dir, output_episode_dir, "images_360_mini.mp4", recording_name, episode_name)
+    # create_video_from_images(miniatures_360_dir, output_episode_dir, "images_360_mini.mp4", recording_name, episode_name)
     
     toc = time.time()
     prSuccess(f"[{recording_name}/episode {episode_name}] Processed in {toc - tic:.2f} seconds")
