@@ -80,12 +80,12 @@ def process_episode(args_tuple):
     """Process a single episode: export filenames and create videos.
     
     Args:
-        args_tuple: Tuple containing (recording_name, episode_name, flags_dict)
+        args_tuple: Tuple containing (recording_name, episode_name)
     
     Returns:
         recording_name, episode_name: For tracking completion
     """
-    recording_name, episode_name, flags_dict = args_tuple
+    recording_name, episode_name = args_tuple
     
     prInfo(f"[{recording_name}/episode {episode_name}] Processing...")
     tic = time.time()
@@ -142,11 +142,13 @@ for recording_name in recordings_list_episodes_json:
         prWarning(f"Skipping unexported recording: {recording_name}")
         continue
     
-    episodes_flags_json_path = os.path.join(DATA_DIRECTORY_EPISODES, recording_name, "episodes_flag.json")
-    episodes_flags_json_dict = read_json_to_dic(episodes_flags_json_path)
+    # episodes_flags_json_path = os.path.join(DATA_DIRECTORY_EPISODES, recording_name, "episodes_flag.json")
+    # episodes_flags_json_dict = read_json_to_dic(episodes_flags_json_path)
+    episodes_json_path = os.path.join(DATA_DIRECTORY_EPISODES, recording_name, "episodes.json")
+    episodes_json_dict = read_json_to_dic(episodes_json_path)
 
-    for episode_name, flags_dict in episodes_flags_json_dict.items():
-        all_episodes.append((recording_name, episode_name, flags_dict))
+    for ep in episodes_json_dict:
+        all_episodes.append((recording_name, ep["episode"]))
 
 # Process episodes in parallel using half the available cores
 num_workers = 1 # max(1, mp.cpu_count() // 2)
