@@ -38,17 +38,18 @@ def verify_episode(args_tuple):
     episode_dir = os.path.join(OUTPUT_DIRECTORY, "recordings", recording_name, "episodes", episode_name)
     if not os.path.exists(episode_dir):
         prError(f"Episode directory does not exist: {episode_dir}")
-        return recording_name, episode_name, False
+        return recording_name, episode_name, False, False, False
     
     filenames_txt_path = os.path.join(episode_dir, "images_360_filenames.txt")
     if not os.path.exists(filenames_txt_path):
         prError(f"Filenames text file does not exist: {filenames_txt_path}")
-        return recording_name, episode_name, False
+        return recording_name, episode_name, False, False, False
     
     with open(filenames_txt_path, "r") as f:
         images_360_basenames = f.readlines()
     images_360_basenames = [basename.strip() for basename in images_360_basenames]
     
+    mini_video_error = False
     mini_vid_path = os.path.join(episode_dir, "images_360_mini.mp4")
     if os.path.exists(mini_vid_path):
         # Check number of frames in the mini video if it exists
@@ -69,20 +70,26 @@ def verify_episode(args_tuple):
                     nb_frames = int(nb_frames_str)
                 except Exception:
                     prWarning(f"Could not interpret nb_frames ({nb_frames_str}) for {mini_vid_path}")
+                    mini_video_error = True
                     nb_frames = None
 
                 if nb_frames is not None:
                     if nb_frames != len(images_360_basenames):
                         prError(f"Mini video frame count ({nb_frames}) does not match number of images ({len(images_360_basenames)}) in {mini_vid_path}")
-                        return recording_name, episode_name, False
+                        mini_video_error = True
                 else:
                     prWarning(f"Could not determine frame count for mini video: {mini_vid_path}")
+                    mini_video_error = True
             else:
                 prWarning(f"ffprobe failed for mini video: {mini_vid_path}\n{result.stderr}")
+                mini_video_error = True
         except Exception as e:
             prWarning(f"Exception during ffprobe frame check for mini video: {mini_vid_path} | {e}")
+            mini_video_error = True
+            
         prSuccess(f"[{recording_name}/episode {episode_name}] | video mini | Verified (nb frames: {nb_frames})")
     
+    full_video_error = False
     full_vid_path = os.path.join(episode_dir, "images_360_full.mp4")
     if os.path.exists(full_vid_path):
         ffprobe_cmd = [
@@ -101,27 +108,33 @@ def verify_episode(args_tuple):
                     nb_frames = int(nb_frames_str)
                 except Exception:
                     prWarning(f"Could not interpret nb_frames ({nb_frames_str}) for {full_vid_path}")
+                    full_video_error = True
                     nb_frames = None
 
                 if nb_frames is not None:
                     if nb_frames != len(images_360_basenames):
                         prError(f"Full video frame count ({nb_frames}) does not match number of images ({len(images_360_basenames)}) in {full_vid_path}")
-                        return recording_name, episode_name, False
+                        full_video_error = True
                 else:
                     prWarning(f"Could not determine frame count for full video: {full_vid_path}")
+                    full_video_error = True
             else:
                 prWarning(f"ffprobe failed for full video: {full_vid_path}\n{result.stderr}")
+                full_video_error = True
         except Exception as e:
             prWarning(f"Exception during ffprobe frame check for full video: {full_vid_path} | {e}")
+            full_video_error = False
         prSuccess(f"[{recording_name}/episode {episode_name}] | video full | Verified (nb frames: {nb_frames})")
 
 
     prSuccess(f"[{recording_name}/episode {episode_name}] | All | Verified (nb frames: {len(images_360_basenames)})")
     
-    return recording_name, episode_name, True
+    return recording_name, episode_name, True, mini_video_error, full_video_error
 
 recordings_list_episodes_json = os.listdir(DATA_DIRECTORY_EPISODES)
 recordings_list_episodes_json.sort()
+
+recordings_list_episodes_json = recordings_list_episodes_json[:2]
 
 if not os.path.exists(OUTPUT_DIRECTORY):
     os.makedirs(os.path.join(OUTPUT_DIRECTORY, "recordings"))
@@ -144,9 +157,9 @@ for recording_name in recordings_list_episodes_json:
 
 errors_episodes = []
 for episode in all_episodes:
-    recording_name, episode_name, success = verify_episode(episode)
-    if not success:
-        errors_episodes.append(episode)
+    recording_name, episode_name, success, mini_video_error, full_video_error = verify_episode(episode)
+    if not success or mini_video_error or full_video_error:
+        errors_episodes.append({"name": f"{recording_name}/episode {episode_name}", "success": success, "mini_video_error": mini_video_error, "full_video_error": full_video_error})
 
 prSuccess(f"Successfully checked {len(all_episodes)} episodes")
 prSuccess(f"Found {len(errors_episodes)} errors")
