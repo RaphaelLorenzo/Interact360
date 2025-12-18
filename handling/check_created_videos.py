@@ -54,13 +54,12 @@ def verify_episode(args_tuple):
         # Check number of frames in the mini video if it exists
         # Use ffprobe to get the frame count
         ffprobe_cmd = [
-            "ffprobe",
-            "-v", "error",
-            "-count_frames",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=nb_read_frames",
-            "-of", "default=nokey=1:noprint_wrappers=1",
-            mini_vid_path
+            "ffmpeg",
+            "-i", mini_vid_path,
+            "-map", "0:v:0",
+            "-c", "copy",
+            "-f", "null",
+            "-"
         ]
         try:
             result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
@@ -100,6 +99,14 @@ def verify_episode(args_tuple):
     
     full_vid_path = os.path.join(episode_dir, "images_360_full.mp4")
     if os.path.exists(full_vid_path):
+        ffprobe_cmd = [
+            "ffmpeg",
+            "-i", mini_vid_path,
+            "-map", "0:v:0",
+            "-c", "copy",
+            "-f", "null",
+            "-"
+        ]
         try:
             result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
             if result.returncode == 0:
