@@ -65,20 +65,6 @@ def verify_episode(args_tuple):
             result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 nb_frames_str = result.stdout.strip()
-                # Fallback for streams that don't support nb_read_frames (e.g., some mp4s)
-                if not nb_frames_str or nb_frames_str == "N/A":
-                    # Try fallback method (may be less accurate)
-                    ffprobe_cmd2 = [
-                        "ffprobe",
-                        "-v", "error",
-                        "-select_streams", "v:0",
-                        "-show_entries", "stream=nb_frames",
-                        "-of", "default=nokey=1:noprint_wrappers=1",
-                        mini_vid_path
-                    ]
-                    result2 = subprocess.run(ffprobe_cmd2, capture_output=True, text=True)
-                    nb_frames_str = result2.stdout.strip()
-
                 try:
                     nb_frames = int(nb_frames_str)
                 except Exception:
@@ -111,20 +97,6 @@ def verify_episode(args_tuple):
             result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 nb_frames_str = result.stdout.strip()
-                # Fallback for streams that don't support nb_read_frames (e.g., some mp4s)
-                if not nb_frames_str or nb_frames_str == "N/A":
-                    # Try fallback method (may be less accurate)
-                    ffprobe_cmd2 = [
-                        "ffprobe",
-                        "-v", "error",
-                        "-select_streams", "v:0",
-                        "-show_entries", "stream=nb_frames",
-                        "-of", "default=nokey=1:noprint_wrappers=1",
-                        full_vid_path
-                    ]
-                    result2 = subprocess.run(ffprobe_cmd2, capture_output=True, text=True)
-                    nb_frames_str = result2.stdout.strip()
-
                 try:
                     nb_frames = int(nb_frames_str)
                 except Exception:
@@ -170,5 +142,14 @@ for recording_name in recordings_list_episodes_json:
     for idx, ep in enumerate(episodes_json_dict):
         all_episodes.append((recording_name, f"{idx:04d}"))
 
+errors_episodes = []
 for episode in all_episodes:
     recording_name, episode_name, success = verify_episode(episode)
+    if not success:
+        errors_episodes.append(episode)
+
+prSuccess(f"Successfully checked {len(all_episodes)} episodes")
+prError(f"Found {len(errors_episodes)} episodes with errors")
+for episode in errors_episodes:
+    prError(f"Error in episode: {episode}")
+
