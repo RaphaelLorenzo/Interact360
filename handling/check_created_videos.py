@@ -164,7 +164,7 @@ prSuccess(f"Found {len(errors_episodes)} errors")
 for episode in errors_episodes:
     prError(f"Error: {episode}")
     
-# write errors to a txt report
+# write errors to a txt report
 timestamp = time.strftime("%Y%m%d_%H%M%S")
 with open(f"errors_report_{timestamp}.txt", "w") as f:
     for episode in errors_episodes:
@@ -173,3 +173,51 @@ with open(f"errors_report_{timestamp}.txt", "w") as f:
         f.write(f"Mini video error: {episode['mini_video_error']}\n")
         f.write(f"Full video error: {episode['full_video_error']}\n")
         f.write("\n")
+
+# Recreate mini videos from full videos where mini has error but full doesn't
+episodes_to_fix = [ep for ep in errors_episodes if ep['mini_video_error'] and not ep['full_video_error']]
+
+if episodes_to_fix:
+    prInfo(f"Found {len(episodes_to_fix)} episodes to fix: recreating mini videos from full videos")
+    
+    for episode in episodes_to_fix:
+        # Parse recording_name and episode_name from episode['name'] (format: "recording_name/episode episode_name")
+        parts = episode['name'].split("/episode ")
+        if len(parts) != 2:
+            prError(f"Could not parse episode name: {episode['name']}")
+            continue
+        
+        recording_name = parts[0]
+        episode_name = parts[1]
+        
+        episode_dir = os.path.join(OUTPUT_DIRECTORY, "recordings", recording_name, "episodes", episode_name)
+        full_vid_path = os.path.join(episode_dir, "images_360_full.mp4")
+        mini_vid_path = os.path.join(episode_dir, "images_360_mini.mp4")
+        
+        if not os.path.exists(full_vid_path):
+            prError(f"Full video does not exist: {full_vid_path}")
+            continue
+        
+        prInfo(f"Recreating mini video for {episode['name']}...")
+        
+        # Use ffmpeg to downscale the full video by 4
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-i", full_vid_path,
+            "-vf", "scale=iw/4:ih/4",
+            "-y",  # Overwrite output file if it exists
+            mini_vid_path
+        ]
+        
+        try:
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                prSuccess(f"Successfully recreated mini video for {episode['name']}")
+            else:
+                prError(f"Failed to recreate mini video for {episode['name']}:\n{result.stderr}")
+        except Exception as e:
+            prError(f"Exception while recreating mini video for {episode['name']}: {e}")
+else:
+    prInfo("No episodes need mini video recreation")
+
+
