@@ -165,3 +165,13 @@ prSuccess(f"Successfully checked {len(all_episodes)} episodes")
 prSuccess(f"Found {len(errors_episodes)} errors")
 for episode in errors_episodes:
     prError(f"Error: {episode}")
+    
+# write errors to a txt report
+timestamp = time.strftime("%Y%m%d_%H%M%S")
+with open(f"errors_report_{timestamp}.txt", "w") as f:
+    for episode in errors_episodes:
+        f.write(f"{episode['name']}\n")
+        f.write(f"Success: {episode['success']}\n")
+        f.write(f"Mini video error: {episode['mini_video_error']}\n")
+        f.write(f"Full video error: {episode['full_video_error']}\n")
+        f.write("\n")
