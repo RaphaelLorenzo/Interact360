@@ -54,21 +54,6 @@ def verify_episode(args_tuple):
         # Check number of frames in the mini video if it exists
         # Use ffprobe to get the frame count
         ffprobe_cmd = [
-            "ffmpeg",
-            "-i", mini_vid_path,
-            "-map", "0:v:0",
-            "-c", "copy",
-            "-f", "null",
-            "-"
-        ]
-        try:
-            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
-            if result.returncode == 0:
-                nb_frames_str = result.stdout.strip()
-                # Fallback for streams that don't support nb_read_frames (e.g., some mp4s)
-                if not nb_frames_str or nb_frames_str == "N/A":
-                    # Try fallback method (may be less accurate)
-                    ffprobe_cmd2 = [
                         "ffprobe",
                         "-v", "error",
                         "-select_streams", "v:0",
@@ -76,9 +61,10 @@ def verify_episode(args_tuple):
                         "-of", "default=nokey=1:noprint_wrappers=1",
                         mini_vid_path
                     ]
-                    result2 = subprocess.run(ffprobe_cmd2, capture_output=True, text=True)
-                    nb_frames_str = result2.stdout.strip()
-
+        try:
+            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                nb_frames_str = result.stdout.strip()
                 try:
                     nb_frames = int(nb_frames_str)
                 except Exception:
@@ -100,21 +86,6 @@ def verify_episode(args_tuple):
     full_vid_path = os.path.join(episode_dir, "images_360_full.mp4")
     if os.path.exists(full_vid_path):
         ffprobe_cmd = [
-            "ffmpeg",
-            "-i", mini_vid_path,
-            "-map", "0:v:0",
-            "-c", "copy",
-            "-f", "null",
-            "-"
-        ]
-        try:
-            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
-            if result.returncode == 0:
-                nb_frames_str = result.stdout.strip()
-                # Fallback for streams that don't support nb_read_frames (e.g., some mp4s)
-                if not nb_frames_str or nb_frames_str == "N/A":
-                    # Try fallback method (may be less accurate)
-                    ffprobe_cmd2 = [
                         "ffprobe",
                         "-v", "error",
                         "-select_streams", "v:0",
@@ -122,9 +93,10 @@ def verify_episode(args_tuple):
                         "-of", "default=nokey=1:noprint_wrappers=1",
                         full_vid_path
                     ]
-                    result2 = subprocess.run(ffprobe_cmd2, capture_output=True, text=True)
-                    nb_frames_str = result2.stdout.strip()
-
+        try:
+            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                nb_frames_str = result.stdout.strip()
                 try:
                     nb_frames = int(nb_frames_str)
                 except Exception:
