@@ -15,6 +15,7 @@ import socket
 hostname = socket.gethostname()
 if hostname == "raphael-Precision-3591":
     DATA_DIRECTORY_EPISODES = "/media/raphael/hucedisk/ShelfyInteractFull/data_extractor/"
+    # DATA_DIRECTORY_EPISODES = "/media/raphael/hucedisk3/ShelfyDatasetNameNextExtension/data_extractor/"
     OUTPUT_DIRECTORY = "/media/raphael/hucedisk3/HUI360-Videos/"
 else:
     DATA_DIRECTORY_EPISODES = "/home/rlorenzo/group_storage/rlorenzo/SSUP/FullVideos/extracted"
@@ -122,9 +123,9 @@ def process_episode(args_tuple):
     # create_video_from_images(miniatures_360_dir, output_episode_dir, "images_360_mini.mp4", recording_name, episode_name)
     
     toc = time.time()
-    prSuccess(f"[{recording_name}/episode {episode_name}] Processed in {toc - tic:.2f} seconds")
+    prSuccess(f"[{recording_name}/episode {episode_name}] Processed in {toc - tic:.2f} seconds ({len(images_360_basenames)} frames)")
     
-    return recording_name, episode_name
+    return recording_name, episode_name, len(images_360_basenames)
 
 recordings_list_episodes_json = os.listdir(DATA_DIRECTORY_EPISODES)
 recordings_list_episodes_json.sort()
@@ -139,6 +140,7 @@ all_episodes = []
 for recording_name in recordings_list_episodes_json:
     
     if recording_name in UNEXPORTED_RECORDINGS:
+        #or ("ShelfyInteractFull" in DATA_DIRECTORY_EPISODES and (recording_name.startswith("rosbag2_2025_07") or recording_name.startswith("rosbag2_2025_10_17") or recording_name.startswith("rosbag2_2025_10_20"))):
         prWarning(f"Skipping unexported recording: {recording_name}")
         continue
     
@@ -147,8 +149,8 @@ for recording_name in recordings_list_episodes_json:
     episodes_json_path = os.path.join(DATA_DIRECTORY_EPISODES, recording_name, "episodes.json")
     episodes_json_dict = read_json_to_dic(episodes_json_path)
 
-    for ep in episodes_json_dict:
-        all_episodes.append((recording_name, ep["episode"]))
+    for idx, ep in enumerate(episodes_json_dict):
+        all_episodes.append((recording_name, f"{idx:04d}"))
 
 # Process episodes in parallel using half the available cores
 num_workers = 1 # max(1, mp.cpu_count() // 2)
@@ -160,7 +162,7 @@ if num_workers > 1:
     try:
         pool = mp.Pool(processes=num_workers)
         results = pool.map(process_episode, all_episodes)
-        prSuccess(f"Successfully processed {len(results)} episodes")
+        prSuccess(f"Successfully processed {len(results)} episodes with {sum([result[2] for result in results])} frames")
     except KeyboardInterrupt:
         prWarning("Keyboard interrupt received. Shutting down pool gracefully...")
         if pool is not None:
@@ -180,5 +182,8 @@ if num_workers > 1:
             pool.join()
 else:
     prInfo(f"Processing {len(all_episodes)} episodes sequentially")
+    total_frames = 0
     for episode in all_episodes:
-        process_episode(episode)
+        recording_name, episode_name, frames = process_episode(episode)
+        total_frames += frames
+    prSuccess(f"Successfully processed {len(all_episodes)} episodes with {total_frames} frames")
