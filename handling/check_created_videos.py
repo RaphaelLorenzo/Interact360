@@ -134,8 +134,6 @@ def verify_episode(args_tuple):
 recordings_list_episodes_json = os.listdir(DATA_DIRECTORY_EPISODES)
 recordings_list_episodes_json.sort()
 
-recordings_list_episodes_json = recordings_list_episodes_json[:2]
-
 if not os.path.exists(OUTPUT_DIRECTORY):
     os.makedirs(os.path.join(OUTPUT_DIRECTORY, "recordings"))
 
