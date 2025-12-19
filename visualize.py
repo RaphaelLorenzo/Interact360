@@ -25,6 +25,9 @@ from misc.rle_tools import decode_RLE, encode_RLE
 
 MASK_RLE_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Video decoding is handled by OpenCV VideoCapture (cv2.VideoCapture)
+# which is already imported and works reliably with PyQt
+
 try:
     from PyQt6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -700,6 +703,14 @@ class Interact360Visualizer(QMainWindow):
         self.full_image_height = None  # Full size image height (for mask decoding) - set when first image is loaded
         self.full_image_width = None  # Full size image width (for mask decoding) - set when first image is loaded
         
+        # Video mode support
+        self.video_mode = args.video_mode
+        self.video_cap = None  # OpenCV VideoCapture instance for current episode
+        self.video_frames = None  # Cached video frames (numpy array)
+        self.video_path = None  # Path to current video file
+        if self.video_mode:
+            prInfo("Using video mode - loading frames from video files using OpenCV")
+        
         # Image rolling to center interaction mask
         self.enable_image_rolling = True  # Enable/disable image rolling (enabled by default)
         self.horizontal_roll_offset = 0  # Horizontal pixel offset for rolling the image
@@ -765,6 +776,24 @@ class Interact360Visualizer(QMainWindow):
         else:
             return os.path.join(self.args.directory, session, "episodes", episode)
     
+    def get_video_path(self, session, episode):
+        """Get the video file path based on video_mode, miniatures, and splitted_dataset settings"""
+        if self.use_mini:
+            video_filename = "images_360_mini.mp4"
+            if self.args.splitted_dataset:
+                video_dir = os.path.join(self.args.directory, "video_mini", session, "episodes", episode)
+            else:
+                video_dir = self.get_episode_dir(session, episode)
+        else:
+            video_filename = "images_360_full.mp4"
+            if self.args.splitted_dataset:
+                video_dir = os.path.join(self.args.directory, "video_full", session, "episodes", episode)
+            else:
+                video_dir = self.get_episode_dir(session, episode)
+        
+        video_path = os.path.join(video_dir, video_filename)
+        return video_path
+    
     def find_episodes(self):
         """Find available episodes in the output directory"""
         episodes_list = []
@@ -778,8 +807,6 @@ class Interact360Visualizer(QMainWindow):
         # DIRECTORY/dataset/recording_name/ should contain the episodes.json and episodes_flag.json files
         # DIRECTORY/dataset/recording_name/episodes/XXX/images_360 should contain the images (if they have been extracted to be used by default) and eventually miniatures_images_360_scale_4 (if miniatures are used)
         # DIRECTORY/annotations/recording_name/episodes/XXX/annotations_360.json should contain the tracking annotations (and the filenames of images_360)
-        
-        ## See later...
         # DIRECTORY/video_mini/recording_name/episodes/XXX/images_360_mini.mp4 should contain the mini video (to be used if video mode and miniatures are used)
         # DIRECTORY/video_full/recording_name/episodes/XXX/images_360_full.mp4 should contain the full video (to be used if video mode)
         
@@ -1312,13 +1339,94 @@ class Interact360Visualizer(QMainWindow):
         
         prInfo(f"Loading episode: {session}/{episode} | {associated_episodes_flags_dict[episode]['flag']}")
         
-        # Load images
-        if self.use_mini:
-            images_dir = os.path.join(episode_dir, "miniatures_images_360_scale_4")
-        else:
-            images_dir = os.path.join(episode_dir, "images_360")
+        # Load images or video frames
+        if self.video_mode:
+            # Load video frames
+            video_path = self.get_video_path(session, episode)
+            if not os.path.exists(video_path):
+                prError(f"Video file not found: {video_path}")
+                self.image_files = []
+                self.video_cap = None
+                self.video_frames = None
+            else:
+                prInfo(f"Loading video: {video_path}")
+                try:
+                    # Use OpenCV VideoCapture for reliable video loading
+                    self.video_cap = cv2.VideoCapture(video_path)
+                    
+                    if not self.video_cap.isOpened():
+                        prError(f"Failed to open video file: {video_path}")
+                        self.image_files = []
+                        self.video_cap = None
+                        self.video_frames = None
+                    else:
+                        # Get video properties
+                        fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+                        frame_count = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                        width = int(self.video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(self.video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        
+                        prInfo(f"Video properties: {width}x{height}, {fps} fps, {frame_count} frames")
+                        
+                        # Decode all frames
+                        frames_list = []
+                        frame_idx = 0
+                        while True:
+                            ret, frame = self.video_cap.read()
+                            if not ret:
+                                break
+                            
+                            # OpenCV returns frames in BGR format, which is what we need
+                            # Frame is already uint8 numpy array in (H, W, C) format
+                            frames_list.append(frame.copy())
+                            frame_idx += 1
+                            
+                            # Progress indicator for long videos
+                            if frame_idx % 100 == 0:
+                                prInfo(f"Loaded {frame_idx}/{frame_count} frames...")
+                        
+                        # Release the VideoCapture as we've loaded all frames
+                        self.video_cap.release()
+                        self.video_cap = None
+                        
+                        self.video_frames = frames_list
+                        self.video_path = video_path
+                        
+                        # Create dummy image_files list for compatibility (using frame indices)
+                        self.image_files = [f"frame_{i:06d}" for i in range(len(self.video_frames))]
+                        prInfo(f"Loaded {len(self.video_frames)} frames from video")
+                        
+                        # Set image dimensions from first frame
+                        if self.video_frames:
+                            self.image_height, self.image_width = self.video_frames[0].shape[:2]
+                            if self.use_mini:
+                                self.full_image_height = int(self.image_height * self.scale_factor)
+                                self.full_image_width = int(self.image_width * self.scale_factor)
+                            else:
+                                self.full_image_height = self.image_height
+                                self.full_image_width = self.image_width
+                            prInfo(f"Video dimensions: {self.image_width}x{self.image_height} (full: {self.full_image_width}x{self.full_image_height})")
+                
+                except Exception as e:
+                    prError(f"Failed to load video: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    self.image_files = []
+                    if self.video_cap is not None:
+                        self.video_cap.release()
+                    self.video_cap = None
+                    self.video_frames = None
         
-        self.image_files = self.get_image_files(images_dir)
+        else:
+            # Load images from directory
+            if self.use_mini:
+                images_dir = os.path.join(episode_dir, "miniatures_images_360_scale_4")
+            else:
+                images_dir = os.path.join(episode_dir, "images_360")
+            
+            self.image_files = self.get_image_files(images_dir)
+            self.video_cap = None
+            self.video_frames = None
         
         # Load detections
         detection_file = os.path.join(annotations_dir, "annotations_360.json")
@@ -1567,24 +1675,32 @@ class Interact360Visualizer(QMainWindow):
         if not self.image_files or self.current_frame >= len(self.image_files):
             return
         
-        image_file = self.image_files[self.current_frame]
-        # image_file_from_dict = self.detections[self.current_frame]["image_file"]
-        
         # Use edited detections if in edit mode and available
         if self.edit_mode and self.current_frame in self.edited_detections:
             detections = self.edited_detections[self.current_frame]["detections"]
         else:
             detections = self.detections[self.current_frame]["detections"] if self.current_frame in self.detections else []
         
-        # Load image
+        # Load image or get frame from video
         tic = time.time()
-        image = cv2.imread(image_file)
-        if image is None:
-            prError(f"Could not load image: {image_file}")
-            return
+        if self.video_mode:
+            # Get frame from video
+            if self.video_frames is None or self.current_frame >= len(self.video_frames):
+                prError(f"Video frame {self.current_frame} not available")
+                return
+            image = self.video_frames[self.current_frame].copy()
+        else:
+            # Load image from file
+            image_file = self.image_files[self.current_frame]
+            image = cv2.imread(image_file)
+            if image is None:
+                prError(f"Could not load image: {image_file}")
+                return
         
         # Store image dimensions (miniature size if using mini)
-        self.image_height, self.image_width = image.shape[:2]
+        # Only update if not already set from video loading
+        if not self.video_mode or self.image_height is None:
+            self.image_height, self.image_width = image.shape[:2]
         
         # Store full image dimensions for mask decoding (if not set yet)
         if self.use_mini and (self.full_image_height is None or self.full_image_width is None):
@@ -1592,7 +1708,7 @@ class Interact360Visualizer(QMainWindow):
             self.full_image_height = int(self.image_height * self.scale_factor)
             self.full_image_width = int(self.image_width * self.scale_factor)
             prInfo(f"Using miniature images: {self.image_width}x{self.image_height} -> Full size: {self.full_image_width}x{self.full_image_height}")
-        elif not self.use_mini:
+        elif not self.use_mini and (self.full_image_height is None or self.full_image_width is None):
             # Not using mini, so current size is full size
             self.full_image_height = self.image_height
             self.full_image_width = self.image_width
@@ -2194,6 +2310,14 @@ class Interact360Visualizer(QMainWindow):
         if 0 <= index < len(self.episodes_list):
             if self.is_playing:
                 self.pause_playback()
+            
+            # Clean up video capture from previous episode
+            if self.video_cap is not None:
+                self.video_cap.release()
+                self.video_cap = None
+            self.video_frames = None
+            self.video_path = None
+            
             self.current_episode_idx = index
             self.load_episode_data()
     
@@ -3096,10 +3220,10 @@ def main():
                        help="Use miniature images (4x smaller) from images_360_miniatures_scale_4 (default: %(default)s)")
     parser.add_argument("--splitted_dataset", "-sd", action="store_true", default=False,
                        help="Use splitted dataset mode, the data and the annotations are separated into different directories (default: %(default)s)")
-    # parser.add_argument("--video_mode", "-vm", action="store_true", default=False,
-    #                    help="Use video mode, load videos (full or mini) instead of images for display (default: %(default)s)")
+    parser.add_argument("--video_mode", "-vm", action="store_true", default=False,
+                       help="Use video mode, load videos (full or mini) instead of images for display (default: %(default)s)")
     args = parser.parse_args()
-    
+
     # Validate arguments
     if not os.path.isdir(args.directory):
         prError(f"Output directory does not exist: {args.directory}")
