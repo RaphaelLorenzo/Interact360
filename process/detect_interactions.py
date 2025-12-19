@@ -78,7 +78,7 @@ def main(args, episode: str):
         episode (str): episode to process
     """
     
-    interact_zone_tracking_path = os.path.join(args.dir, "episodes", episode, "interact_zone_tracking_360.json")
+    interact_zone_tracking_path = os.path.join(args.dir, "episodes", episode, "interaction_zone_tracking_360.json")
     if os.path.exists(interact_zone_tracking_path):
         prInfo(f"Interact zone tracking file {interact_zone_tracking_path} exists using it to get a different mask for each frame. Ignoring the default or specified mask ({args.intersection_mask_path})")
         interact_zone_tracking_dict = read_json_to_dic(interact_zone_tracking_path) # list of detection of type : [{"image_file": "image_file.jpg", "detections": [{"track_id": 1, "xmin": 10, "ymin": 10, "xmax": 100, "ymax": 100, "mask_rle": "mask_rle"}, ...]}, ...]
@@ -98,7 +98,7 @@ def main(args, episode: str):
     
     width, height = cv2.imread(image_files[0]).shape[:2]
     
-    detections_path = os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json")
+    detections_path = os.path.join(args.dir, "episodes", episode, "annotations_360.json")
     if not os.path.exists(detections_path):
         raise ValueError("Detection file {} does not exist".format(detections_path))
     

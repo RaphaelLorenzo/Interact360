@@ -59,8 +59,8 @@ for recording_name in recordings_list_episodes_json:
     
     for episode_name, flags_dict in episodes_flags_json_dict.items():
         
-        interaction_zone_tracking_path = os.path.join(SSUP_DIRECTORY_EPISODES_JSON, recording_name, "episodes", episode_name, "interact_zone_tracking_360.json")
-        detections_path = os.path.join(SSUP_DIRECTORY_EPISODES_JSON, recording_name, "episodes", episode_name, "sam2_detections_360.json")
+        interaction_zone_tracking_path = os.path.join(SSUP_DIRECTORY_EPISODES_JSON, recording_name, "episodes", episode_name, "interaction_zone_tracking_360.json")
+        detections_path = os.path.join(SSUP_DIRECTORY_EPISODES_JSON, recording_name, "episodes", episode_name, "annotations_360.json")
         assert(os.path.exists(interaction_zone_tracking_path)), f"Interaction zone tracking file does not exist: {interaction_zone_tracking_path}"
         assert(os.path.exists(detections_path)), f"Detections file does not exist: {detections_path}"
 

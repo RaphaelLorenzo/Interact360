@@ -835,7 +835,7 @@ class Interact360Visualizer(QMainWindow):
     
     def load_interact_zone_tracking(self, episode_dir):
         """Load dynamic interaction zone tracking if available"""
-        interact_zone_tracking_path = os.path.join(episode_dir, "interact_zone_tracking_360.json")
+        interact_zone_tracking_path = os.path.join(episode_dir, "interaction_zone_tracking_360.json")
         
         if os.path.exists(interact_zone_tracking_path):
             self.interact_zone_tracking = read_json_to_dic(interact_zone_tracking_path)
@@ -1320,7 +1320,7 @@ class Interact360Visualizer(QMainWindow):
         self.image_files = self.get_image_files(images_dir)
         
         # Load detections
-        detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
+        detection_file = os.path.join(episode_dir, "annotations_360.json")
         if os.path.exists(detection_file):
             detections_list = read_json_to_dic(detection_file)
             detections_list = self.reorder_detections_list(detections_list)
@@ -2153,12 +2153,12 @@ class Interact360Visualizer(QMainWindow):
                     # Create backup
                     session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
                     episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
-                    detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
+                    detection_file = os.path.join(episode_dir, "annotations_360.json")
                     
                     if os.path.exists(detection_file):
                         # Create timestamped backup
                         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        backup_file = os.path.join(episode_dir, f"sam2_detections_360_backup_{timestamp}.json")
+                        backup_file = os.path.join(episode_dir, f"annotations_360_backup_{timestamp}.json")
                         import shutil
                         shutil.copy2(detection_file, backup_file)
                     
@@ -2968,12 +2968,12 @@ class Interact360Visualizer(QMainWindow):
             # Create backup
             session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
             episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
-            detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
+            detection_file = os.path.join(episode_dir, "annotations_360.json")
             
             if os.path.exists(detection_file):
                 # Create timestamped backup
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_file = os.path.join(episode_dir, f"sam2_detections_360_backup_{timestamp}.json")
+                backup_file = os.path.join(episode_dir, f"annotations_360_backup_{timestamp}.json")
                 import shutil
                 shutil.copy2(detection_file, backup_file)
                 self.statusBar().showMessage(f"Backup created: {os.path.basename(backup_file)}")
@@ -3060,7 +3060,7 @@ class Interact360Visualizer(QMainWindow):
         """Save current detections to JSON file"""
         session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
         episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
-        detection_file = os.path.join(episode_dir, "sam2_detections_360.json")
+        detection_file = os.path.join(episode_dir, "annotations_360.json")
         
         # Convert detections back to list format
         detections_list = []

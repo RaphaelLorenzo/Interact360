@@ -1060,6 +1060,8 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     images_list = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(images_path)) for f in fn if (f.endswith(".jpg") or f.endswith(".jpeg") or f.endswith(".JPG") or f.endswith(".JPEG") or f.endswith(".png") or f.endswith(".PNG"))]
     images_list.sort()
     
+    image_shape = list(cv2.imread(images_list[0]).shape)
+    
     # images_list = images_list[300:550]
     
     assert(len(images_list) > 0), "No images found in the images path : {}".format(images_path)
@@ -1072,7 +1074,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         
         yolo_detections_output = []
         for image_idx in range(0, len(images_list)):
-            current_image_detections = {"image_file": os.path.basename(images_list[image_idx]), "detections": []}
+            current_image_detections = {"image_file": os.path.basename(images_list[image_idx]), "image_shape": image_shape, "detections": []}
             if image_idx == 0:
                 # only add for the first image
                 current_image_detections["detections"].append({"xmin": interact_zone_prompt[0],
@@ -1096,7 +1098,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         for image_idx in tqdm(range(0, len(images_list)), desc="Processing input images (detection with YOLO)"):
             
             if image_idx % args.track_initialization_skip_n_images != 0:
-                current_image_detections = {"image_file": os.path.basename(images_list[image_idx]), "detections": []}
+                current_image_detections = {"image_file": os.path.basename(images_list[image_idx]), "image_shape": image_shape, "detections": []}
                 yolo_detections_output.append(current_image_detections)
                 continue
             
@@ -1146,7 +1148,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                 subimages = [subimage.astype(np.float32) / 255.0 for subimage in subimages]
 
                 # YOLO detection element to be appended to the output
-                current_image_detections = {"image_file": os.path.basename(image_files_batch[batch_image_idx]), "detections": []}
+                current_image_detections = {"image_file": os.path.basename(image_files_batch[batch_image_idx]), "image_shape": image_shape, "detections": []}
                 
                 # Iterate over subimages
                 for position, result, subimage in zip(image_decomposition_positions, subimages_detections, subimages):
@@ -1227,7 +1229,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
             
             # skip images for track initialization !
             if image_idx % args.track_initialization_skip_n_images != 0:
-                filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
+                filtered_yolo_detections_output.append({"image_file": image_file, "image_shape": image_shape, "detections": []})
                 continue
             
             yolo_detections_in_image = yolo_detections_output[image_idx]["detections"]
@@ -1235,7 +1237,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
             # skip image if no detections
             if len(yolo_detections_in_image) == 0:
                 prWarning(f"[{episode}] No detections in image : {image_file}, skipping")
-                filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
+                filtered_yolo_detections_output.append({"image_file": image_file, "image_shape": image_shape, "detections": []})
                 continue
 
             # Load the full image        
@@ -1282,7 +1284,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
             # skip image if not valid detections
             if len(valid_detections_images_centered_for_current_image) == 0:
                 prWarning(f"[{episode}] No valid detections in image : {image_file}, skipping")
-                filtered_yolo_detections_output.append({"image_file": image_file, "detections": []})
+                filtered_yolo_detections_output.append({"image_file": image_file, "image_shape": image_shape, "detections": []})
                 continue
                     
             # Predict the SAM2 image segmentation masks batch by batch
@@ -1391,7 +1393,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                     
                     filtered_yolo_detections_output_current_detections.append(original_yolo_detection)
             
-            filtered_yolo_detections_output.append({"image_file": image_file, "detections": filtered_yolo_detections_output_current_detections})
+            filtered_yolo_detections_output.append({"image_file": image_file, "image_shape": image_shape, "detections": filtered_yolo_detections_output_current_detections})
             
             if args.display:
                 display_full_image_with_filtering(args, episode, image_idx, main_image_show)
@@ -1417,7 +1419,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
             if len(yolo_detections_in_image) == 0:
                 # before skipping, create the entry in the sam2_detections_output if it does not exist
                 if image_idx not in sam2_detections_output:
-                    sam2_detections_output[image_idx] = {"image_file": image_file, "detections": []}
+                    sam2_detections_output[image_idx] = {"image_file": image_file, "image_shape": image_shape, "detections": []}
                 # prWarning("No detections in image : {}, skipping".format(image_file))
                 continue
 
@@ -1432,7 +1434,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                                 
                 # Create the entry in the sam2_detections_output if it does not exist
                 if image_idx not in sam2_detections_output:
-                    sam2_detections_output[image_idx] = {"image_file": image_file, "detections": []}
+                    sam2_detections_output[image_idx] = {"image_file": image_file, "image_shape": image_shape, "detections": []}
                                 
                 # Check if the initial mask matches with any existing SAM2 track
                 yolo_detection_box = [yolo_detection["xmin"], yolo_detection["ymin"], yolo_detection["xmax"], yolo_detection["ymax"]]
@@ -1602,7 +1604,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
                         
                     # Create the entry in the sam2_detections_output if it does not exist
                     if following_image_idx not in sam2_detections_output:
-                        sam2_detections_output[following_image_idx] = {"image_file": following_image_file, "detections": []}
+                        sam2_detections_output[following_image_idx] = {"image_file": following_image_file, "image_shape": image_shape, "detections": []}
                     
                     # Check if the detection matches with any existing SAM2 track
                     matching_sam2_track = None
@@ -1673,6 +1675,7 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
     sam2_detections_output_list = []
     for image_idx, image_detections in sam2_detections_output.items():
         image_detections["image_file"] = os.path.basename(image_detections["image_file"])
+        image_detections["image_shape"] = image_shape
         for det in image_detections["detections"]:
             mask_rle_list = det["mask_rle"].cpu().numpy().tolist()
             det["mask_rle"] = ",".join([str(int(x)) for x in mask_rle_list])
@@ -1693,14 +1696,14 @@ def main(args, video_predictor: SAM2CameraPredictor, image_predictor: SAM2ImageP
         
     # Write the detections to a JSON file
     if args.interact_zone_tracking != "":
-        write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "interact_zone_tracking_360.json"))
+        write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "interaction_zone_tracking_360.json"))
         last_detection_element = sam2_detections_output_list[-1]["detections"]
         assert(len(last_detection_element) == 1), f"There should be one and only one detection element (got {len(last_detection_element)})"
         new_interact_zone_prompt = [last_detection_element[0]["xmin"], last_detection_element[0]["ymin"], last_detection_element[0]["xmax"], last_detection_element[0]["ymax"]]
         prInfo(f"[{episode}] Updating interact zone prompt for the next episode from {interact_zone_prompt} to {new_interact_zone_prompt}")
         UPDATED_INTERACT_ZONE_PROMPT = new_interact_zone_prompt
     else:
-        write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "sam2_detections_360.json"))
+        write_dic_to_json_file(sam2_detections_output_list, os.path.join(args.dir, "episodes", episode, "annotations_360.json"))
     
 
 if __name__ == "__main__":

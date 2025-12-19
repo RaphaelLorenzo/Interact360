@@ -154,7 +154,7 @@ def process_episode(args, ep, image_processor, model, device):
     image_files = [os.path.join(image_dir, f) for f in image_files if f.endswith(".jpg")]
     image_files.sort()
     
-    detections_path = os.path.join(args.dir, "episodes", ep, "sam2_detections_360.json")
+    detections_path = os.path.join(args.dir, "episodes", ep, "annotations_360.json")
     if not os.path.exists(detections_path):
         raise ValueError("Detection file {} does not exist".format(detections_path))
     
@@ -257,7 +257,7 @@ if __name__ == "__main__":
 
     for ep in episodes_list:
         assert os.path.isdir(os.path.join(args.dir, "episodes", ep, "images_360")), "Episode {} should exist".format(ep)
-        assert os.path.isfile(os.path.join(args.dir, "episodes", ep, "sam2_detections_360.json")), "Detection file {} does not exist".format(os.path.join(args.dir, "episodes", ep, "sam2_detections_360.json"))
+        assert os.path.isfile(os.path.join(args.dir, "episodes", ep, "annotations_360.json")), "Detection file {} does not exist".format(os.path.join(args.dir, "episodes", ep, "annotations_360.json"))
 
     prInfo("Extracting poses for episodes : {}".format(", ".join(episodes_list)))
     

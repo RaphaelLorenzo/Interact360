@@ -125,7 +125,7 @@ The process is explained in the publication. Many options are related to the fil
 
 **Fixed interaction zone** : By default we use the mask of `assets/default_mask_intersection_zone.png` update it according to your needs if you have a fixed interaction zone. 
 
-**Moving interaction zone** : If you have a moving interaction zone (like in SSUP) you can first track the interaction zone by passing its bouding box in the first image of your sequence as `-izt xmin,ymin,xmax,ymax`, note that `xmax` can be `> width` this is the way to track an object that appears on both sides of the equirectangular image. This will create a file `interact_zone_tracking_360.json` in each episode, that will be used by default by `detect_interaction.py`.
+**Moving interaction zone** : If you have a moving interaction zone (like in SSUP) you can first track the interaction zone by passing its bouding box in the first image of your sequence as `-izt xmin,ymin,xmax,ymax`, note that `xmax` can be `> width` this is the way to track an object that appears on both sides of the equirectangular image. This will create a file `interaction_zone_tracking_360.json` in each episode, that will be used by default by `detect_interaction.py`.
 ```
 python process/detect_segment_and_track.py -d ./demo/output/SSUP_SAMPLE_0/ -izt 2688,1042,4585,1919
 ```
@@ -180,7 +180,7 @@ A metadata file `episodes.json` will be created and placed at the root of the ex
 ```
 
 
-2. When using the different steps of processing you will end up with json files, the main one is `sam2_detection_360.json` (if you are using `-izt` option for mobile interaction zone, you will also have `interact_zone_tracking_360.json`). Along the process copies are created you may remove them later to save space.
+2. When using the different steps of processing you will end up with json files, the main one is `annotations_360.json` (if you are using `-izt` option for mobile interaction zone, you will also have `interaction_zone_tracking_360.json`). Along the process copies are created you may remove them later to save space.
 
 ```
 /media/jdoe/interactpano/MyPanoVideoName
@@ -188,17 +188,17 @@ A metadata file `episodes.json` will be created and placed at the root of the ex
 ├── episodes
 │   ├── 0000
 │   │   ├── images_360
-│   │   ├── sam2_detections_360_copy_2025_10_23_16_46_28.json
-│   │   └── sam2_detections_360.json
+│   │   ├── annotations_360_copy_2025_10_23_16_46_28.json
+│   │   └── annotations_360.json
 │   └── 0001
 │       ├── images_360
-│       ├── sam2_detections_360_copy_2025_10_23_16_40_19.json
-│       └── sam2_detections_360.json
+│       ├── annotations_360_copy_2025_10_23_16_40_19.json
+│       └── annotations_360.json
 ├── episodes.json
 └── metadata_360_extraction.txt
 ```
 
-The structure of the `sam2_detection_360.json` file is the following (after pose extraction). It is a list of length of the number of image files in `images_360` for each image a dict contains some metadata : `"image_file"` (just the filename, that should be its formated timestamp) and `"image_shape"` (`height, width, channels`). For each file a list of `"detections"` (length is the number of person detected and tracked in the image), each detection is dict with the following informations. 
+The structure of the `annotations_360.json` file is the following (after pose extraction). It is a list of length of the number of image files in `images_360` for each image a dict contains some metadata : `"image_file"` (just the filename, that should be its formated timestamp) and `"image_shape"` (`height, width, channels`). For each file a list of `"detections"` (length is the number of person detected and tracked in the image), each detection is dict with the following informations. 
 - `"track_id"` is assigned to each person tracked along the episode.
 - The bounding box coordinates are expressed as `xmin`, `ymin`, `xmax` and `ymax` in pixels. As the 360 image is wrapped, some may exceed the image size (but should not be negative) : pixel `(4283,783)` corresponds to pixel `(443,783)`.
 - `"validity"` flag is assigned (default is `valid`) but it might be corrected in the manual correction tool
@@ -333,14 +333,14 @@ The tools will also create backups when modifying the tracks for example. You wi
 ├── episodes
 │   ├── 0000
 │   │   ├── images_360
-│   │   ├── sam2_detections_360_copy_2025_10_23_16_46_28.json
-│   │   ├── sam2_detections_360_backup_20251023_185128.json
-│   │   └── sam2_detections_360.json
+│   │   ├── annotations_360_copy_2025_10_23_16_46_28.json
+│   │   ├── annotations_360_backup_20251023_185128.json
+│   │   └── annotations_360.json
 │   └── 0001
 │       ├── images_360
-│       ├── sam2_detections_360_copy_2025_10_23_16_40_19.json
-│       ├── sam2_detections_360_backup_20251023_193221.json
-│       └── sam2_detections_360.json
+│       ├── annotations_360_copy_2025_10_23_16_40_19.json
+│       ├── annotations_360_backup_20251023_193221.json
+│       └── annotations_360.json
 ├── episodes.json
 ├── episodes_flag.json
 └── metadata_360_extraction.txt

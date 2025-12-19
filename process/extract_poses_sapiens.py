@@ -270,7 +270,7 @@ def main(args, ep, pose_estimator):
     image_files = [os.path.join(image_dir, f) for f in image_files if f.endswith(".jpg")]
     image_files.sort()
     
-    detections_path = os.path.join(args.dir, "episodes", ep, "sam2_detections_360.json")
+    detections_path = os.path.join(args.dir, "episodes", ep, "annotations_360.json")
     if not os.path.exists(detections_path):
         raise ValueError("Detection file {} does not exist".format(detections_path))
     
