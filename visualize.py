@@ -655,6 +655,122 @@ class AllTracksEngagementDialog(QDialog):
         self.accept()
 
 
+class EpisodePreloadWorker(QThread):
+    """Worker thread to preload next episode's data in background"""
+    finished = pyqtSignal(int, dict, list, object, str, list)  # episode_idx, detections_dict, video_frames, video_cap, video_path, image_files
+    error = pyqtSignal(int, str)  # episode_idx, error_message
+    
+    def __init__(self, visualizer, episode_idx):
+        super().__init__()
+        self.visualizer = visualizer
+        self.episode_idx = episode_idx
+        self._cancelled = False
+    
+    def cancel(self):
+        """Cancel the preload operation"""
+        self._cancelled = True
+    
+    def run(self):
+        """Load episode data in background"""
+        try:
+            # Check for interruption request
+            if self.isInterruptionRequested() or self._cancelled or self.episode_idx >= len(self.visualizer.episodes_list):
+                return
+            
+            session, episode, associated_episodes_flags_dict = self.visualizer.episodes_list[self.episode_idx]
+            episode_dir = self.visualizer.get_episode_dir(session, episode)
+            annotations_dir = self.visualizer.get_annotations_dir(session, episode)
+            
+            # Check cancellation before proceeding
+            if self.isInterruptionRequested() or self._cancelled:
+                return
+            
+            # Determine image_files first
+            image_files = []
+            if self.visualizer.video_mode:
+                video_path = self.visualizer.get_video_path(session, episode)
+                if os.path.exists(video_path):
+                    temp_cap = cv2.VideoCapture(video_path)
+                    if temp_cap.isOpened():
+                        frame_count = int(temp_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                        image_files = [f"frame_{i:06d}" for i in range(frame_count)]
+                    temp_cap.release()
+            else:
+                if self.visualizer.use_mini:
+                    images_dir = os.path.join(episode_dir, "miniatures_images_360_scale_4")
+                else:
+                    images_dir = os.path.join(episode_dir, "images_360")
+                image_files = self.visualizer.get_image_files(images_dir)
+            
+            # Check cancellation
+            if self.isInterruptionRequested() or self._cancelled:
+                return
+            
+            # Load annotations
+            detection_file = os.path.join(annotations_dir, "annotations_360.json")
+            detections_dict = {}
+            if os.path.exists(detection_file):
+                detections_list = read_json_to_dic(detection_file)
+                detections_list = self.visualizer.reorder_detections_list(detections_list)
+                # Temporarily set image_files for conversion
+                original_image_files = self.visualizer.image_files
+                self.visualizer.image_files = image_files
+                detections_dict = self.visualizer.convert_detections_list_to_dict(detections_list)
+                # Restore original image_files
+                self.visualizer.image_files = original_image_files
+            
+            # Check cancellation
+            if self.isInterruptionRequested() or self._cancelled:
+                return
+            
+            # Load video frames if video_mode and mini
+            video_frames = None
+            video_cap = None
+            video_path = None
+            
+            if self.visualizer.video_mode and self.visualizer.use_mini:
+                video_path = self.visualizer.get_video_path(session, episode)
+                if os.path.exists(video_path):
+                    try:
+                        video_cap = cv2.VideoCapture(video_path)
+                        if video_cap.isOpened():
+                            frames_list = []
+                            frame_idx = 0
+                            while True:
+                                if self.isInterruptionRequested() or self._cancelled:
+                                    # Clean up and exit
+                                    video_cap.release()
+                                    return
+                                
+                                ret, frame = video_cap.read()
+                                if not ret:
+                                    break
+                                frames_list.append(frame.copy())
+                                frame_idx += 1
+                            
+                            video_cap.release()
+                            video_cap = None
+                            video_frames = frames_list
+                    except Exception as e:
+                        if not self._cancelled:
+                            prWarning(f"Failed to preload video frames for episode {self.episode_idx}: {e}")
+                        if video_cap is not None:
+                            video_cap.release()
+                        video_cap = None
+            
+            # Check cancellation before emitting signal
+            if self.isInterruptionRequested() or self._cancelled:
+                return
+            
+            # Emit finished signal with preloaded data
+            self.finished.emit(self.episode_idx, detections_dict, video_frames, video_cap, video_path, image_files)
+            
+        except Exception as e:
+            import traceback
+            error_msg = f"Preload error: {str(e)}\n{traceback.format_exc()}"
+            self.error.emit(self.episode_idx, error_msg)
+
+
 class Interact360Visualizer(QMainWindow):
     def __init__(self, args):
         super().__init__()
@@ -710,6 +826,10 @@ class Interact360Visualizer(QMainWindow):
         self.video_path = None  # Path to current video file
         if self.video_mode:
             prInfo("Using video mode - loading frames from video files using OpenCV")
+        
+        # Preloading support
+        self.preload_worker = None  # Background worker for preloading
+        self.preloaded_data = {}  # Cache for preloaded episode data: {episode_idx: {'detections': ..., 'video_frames': ..., 'video_path': ...}}
         
         # Image rolling to center interaction mask
         self.enable_image_rolling = True  # Enable/disable image rolling (enabled by default)
@@ -1319,14 +1439,97 @@ class Interact360Visualizer(QMainWindow):
         
         # Episode navigation shortcuts
         QShortcut(QKeySequence("Ctrl+B"), self, self.previous_episode)
-        QShortcut(QKeySequence("Ctrl+N"), self, self.next_episode)
+        # Store next episode shortcut so we can enable/disable it
+        self.next_episode_shortcut = QShortcut(QKeySequence("Ctrl+N"), self, self.next_episode)
     
     def load_episode_data(self):
         """Load data for current episode"""
         if not self.episodes_list:
             prWarning("No episodes available")
             return
+        
+        # Check if we have preloaded data for this episode
+        if self.current_episode_idx in self.preloaded_data:
+            prInfo(f"Using preloaded data for episode {self.current_episode_idx}")
+            preloaded = self.preloaded_data.pop(self.current_episode_idx)
             
+            session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
+            episode_dir = self.get_episode_dir(session, episode)
+            annotations_dir = self.get_annotations_dir(session, episode)
+            
+            # Store the episodes flags path for this episode
+            if self.args.splitted_dataset:
+                self.current_episodes_flags_path = os.path.join(self.args.directory, "dataset", session, "episodes_flag.json")
+            else:
+                self.current_episodes_flags_path = os.path.join(self.args.directory, session, "episodes_flag.json")
+            
+            # Use preloaded data
+            self.detections = preloaded.get('detections', {})
+            self.image_files = preloaded.get('image_files', [])
+            
+            # Extract plot data from detections
+            if self.detections:
+                detections_list = []
+                for frame_idx in sorted(self.detections.keys()):
+                    frame_data = self.detections[frame_idx]
+                    if "image_file" in frame_data:
+                        detections_list.append(frame_data)
+                self.extract_plot_data(detections_list)
+            
+            # Use preloaded video frames if available (mini videos)
+            if preloaded.get('video_frames') is not None:
+                self.video_frames = preloaded['video_frames']
+                self.video_path = preloaded.get('video_path')
+                self.video_cap = None
+                
+                # Set image dimensions from first frame
+                if self.video_frames:
+                    self.image_height, self.image_width = self.video_frames[0].shape[:2]
+                    self.full_image_height = int(self.image_height * self.scale_factor)
+                    self.full_image_width = int(self.image_width * self.scale_factor)
+                    prInfo(f"Video dimensions: {self.image_width}x{self.image_height} (full: {self.full_image_width}x{self.full_image_height})")
+            elif self.video_mode and not self.use_mini:
+                # Full resolution: need to open VideoCapture
+                video_path = self.get_video_path(session, episode)
+                if os.path.exists(video_path):
+                    self.video_cap = cv2.VideoCapture(video_path)
+                    if self.video_cap.isOpened():
+                        ret, first_frame = self.video_cap.read()
+                        if ret:
+                            self.image_height, self.image_width = first_frame.shape[:2]
+                            self.full_image_height = self.image_height
+                            self.full_image_width = self.image_width
+                        self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            
+            # Load interact zone tracking
+            self.load_interact_zone_tracking(annotations_dir)
+            
+            # Update UI
+            self.update_slider()
+            self.current_frame = 0
+            self.update_image_display()
+            self.update_track_list()
+            self.update_plots()
+            
+            # Update interaction UI availability
+            has_interaction_data = (self.interaction_mask is not None or self.interact_zone_tracking is not None)
+            self.show_interaction_highlights_cb.setEnabled(has_interaction_data)
+            self.show_interaction_zone_cb.setEnabled(has_interaction_data)
+            
+            status_msg = f"Loaded episode {session}/{episode} (from cache) - {len(self.image_files)} frames, {len(self.detections)} detection frames"
+            self.statusBar().showMessage(status_msg)
+            prInfo(status_msg)
+            
+            # Initialize edit mode if enabled
+            if self.edit_mode:
+                self.initialize_edited_detections()
+                self.calculate_next_available_id()
+            
+            # Trigger preload of next episode
+            self.preload_next_episode()
+            return
+            
+        # Normal loading path (no preloaded data)
         session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
         episode_dir = self.get_episode_dir(session, episode)
         annotations_dir = self.get_annotations_dir(session, episode)
@@ -1488,6 +1691,121 @@ class Interact360Visualizer(QMainWindow):
         if self.edit_mode:
             self.initialize_edited_detections()
             self.calculate_next_available_id()
+        
+        # Trigger preload of next episode
+        self.preload_next_episode()
+
+    
+    def stop_preload_worker(self):
+        """Cancel the preload worker (simple cancellation, no waiting)"""
+        if self.preload_worker is not None and self.preload_worker.isRunning():
+            # Just cancel it - it will finish on its own
+            self.preload_worker.cancel()
+            self.preload_worker.requestInterruption()
+            # Disconnect signals to prevent callbacks
+            try:
+                self.preload_worker.finished.disconnect()
+                self.preload_worker.error.disconnect()
+            except:
+                pass
+            # Don't wait - just let it finish naturally
+            self.preload_worker = None
+    
+    def preload_next_episode(self):
+        """Preload next episode's data in background"""
+        # Stop any existing preload worker
+        self.stop_preload_worker()
+        
+        # Check if there's a next episode
+        next_idx = self.current_episode_idx + 1
+        if next_idx >= len(self.episodes_list):
+            # No next episode - disable button
+            if hasattr(self, 'next_episode_btn'):
+                self.next_episode_btn.setEnabled(False)
+            return  # No next episode
+        
+        # Check if already preloaded
+        if next_idx in self.preloaded_data:
+            # Already preloaded - enable button
+            if hasattr(self, 'next_episode_btn'):
+                self.next_episode_btn.setEnabled(True)
+            return  # Already preloaded
+        
+        # Clean up old preloaded data (keep only current and next)
+        keys_to_remove = [k for k in self.preloaded_data.keys() if k != self.current_episode_idx and k != next_idx]
+        for k in keys_to_remove:
+            preloaded = self.preloaded_data.pop(k)
+            # Clean up video frames if present
+            if preloaded.get('video_frames') is not None:
+                del preloaded['video_frames']
+        
+        # Disable next episode button while preloading
+        if hasattr(self, 'next_episode_btn'):
+            self.next_episode_btn.setEnabled(False)
+            self.next_episode_btn.setText("Next ▶ [Loading...]")
+        
+        # Start preload worker
+        prInfo(f"Preloading episode {next_idx} in background...")
+        self.preload_worker = EpisodePreloadWorker(self, next_idx)
+        self.preload_worker.finished.connect(self.on_preload_finished)
+        self.preload_worker.error.connect(self.on_preload_error)
+        self.preload_worker.start()
+    
+    def on_preload_finished(self, episode_idx, detections_dict, video_frames, video_cap, video_path, image_files):
+        """Handle preload completion"""
+        prInfo(f"Preload completed for episode {episode_idx}")
+        self.preloaded_data[episode_idx] = {
+            'detections': detections_dict,
+            'video_frames': video_frames,
+            'video_cap': video_cap,
+            'video_path': video_path,
+            'image_files': image_files
+        }
+        self.preload_worker = None
+        
+        # Re-enable next episode button if this was the next episode
+        if hasattr(self, 'next_episode_btn'):
+            next_idx = self.current_episode_idx + 1
+            if episode_idx == next_idx:
+                self.next_episode_btn.setEnabled(True)
+                self.next_episode_btn.setText("Next ▶ [Ctrl+N]")
+            self.update_next_episode_button_state()
+    
+    def on_preload_error(self, episode_idx, error_msg):
+        """Handle preload error"""
+        prWarning(f"Preload failed for episode {episode_idx}: {error_msg}")
+        self.preload_worker = None
+        
+        # Re-enable next episode button even on error
+        if hasattr(self, 'next_episode_btn'):
+            self.update_next_episode_button_state()
+    
+    def update_next_episode_button_state(self):
+        """Update the next episode button, shortcut, and dropdown enabled state"""
+        if not hasattr(self, 'next_episode_btn'):
+            return
+        
+        next_idx = self.current_episode_idx + 1
+        has_next = next_idx < len(self.episodes_list)
+        is_preloading = self.preload_worker is not None and self.preload_worker.isRunning()
+        is_preloaded = next_idx in self.preloaded_data if has_next else False
+        
+        # Enable if there's a next episode and either preloaded or not currently preloading
+        enabled = has_next and (is_preloaded or not is_preloading)
+        self.next_episode_btn.setEnabled(enabled)
+        
+        # Also enable/disable the Ctrl+N shortcut
+        if hasattr(self, 'next_episode_shortcut'):
+            self.next_episode_shortcut.setEnabled(enabled)
+        
+        # Disable episode dropdown during preloading to prevent switching episodes
+        if hasattr(self, 'episode_combo'):
+            self.episode_combo.setEnabled(not is_preloading)
+        
+        if is_preloading:
+            self.next_episode_btn.setText("Next ▶ [Loading...]")
+        else:
+            self.next_episode_btn.setText("Next ▶ [Ctrl+N]")
 
     
     def get_image_files(self, directory):
@@ -2350,6 +2668,9 @@ class Interact360Visualizer(QMainWindow):
             if self.is_playing:
                 self.pause_playback()
             
+            # Stop preload worker before switching episodes (prevents core dump)
+            self.stop_preload_worker()
+            
             # Clean up video capture from previous episode
             if self.video_cap is not None:
                 self.video_cap.release()
@@ -2359,6 +2680,9 @@ class Interact360Visualizer(QMainWindow):
             
             self.current_episode_idx = index
             self.load_episode_data()
+            
+            # Update next episode button state after loading
+            self.update_next_episode_button_state()
     
     def previous_episode(self):
         """Navigate to the previous episode"""
