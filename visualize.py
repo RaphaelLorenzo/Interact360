@@ -751,6 +751,20 @@ class Interact360Visualizer(QMainWindow):
         write_dic_to_json_file(episodes_flags_dict, episodes_flags_path)
         prInfo(f"Created episodes flags file: {episodes_flags_path}")
     
+    def get_episode_dir(self, session, episode):
+        """Get the episode directory path (for images and interaction zone tracking)"""
+        if self.args.splitted_dataset:
+            return os.path.join(self.args.directory, "dataset", session, "episodes", episode)
+        else:
+            return os.path.join(self.args.directory, session, "episodes", episode)
+    
+    def get_annotations_dir(self, session, episode):
+        """Get the annotations directory path (for annotations_360.json)"""
+        if self.args.splitted_dataset:
+            return os.path.join(self.args.directory, "annotations", session, "episodes", episode)
+        else:
+            return os.path.join(self.args.directory, session, "episodes", episode)
+    
     def find_episodes(self):
         """Find available episodes in the output directory"""
         episodes_list = []
@@ -759,58 +773,48 @@ class Interact360Visualizer(QMainWindow):
             prError(f"Output directory does not exist: {self.args.directory}")
             return episodes_list
         
-    
-        if self.args.recording_name != "" and not os.path.exists(os.path.join(self.args.directory, self.args.recording_name)):
-            prError(f"Recording name does not exist: {self.args.recording_name} in directory {self.args.directory}")
+        
+        # If we are in a "splitted_dataset" mode, then the data and the annotations are separated into different directories : 
+        # DIRECTORY/dataset/recording_name/ should contain the episodes.json and episodes_flag.json files
+        # DIRECTORY/dataset/recording_name/episodes/XXX/images_360 should contain the images (if they have been extracted to be used by default) and eventually miniatures_images_360_scale_4 (if miniatures are used)
+        # DIRECTORY/annotations/recording_name/episodes/XXX/annotations_360.json should contain the tracking annotations (and the filenames of images_360)
+        
+        ## See later...
+        # DIRECTORY/video_mini/recording_name/episodes/XXX/images_360_mini.mp4 should contain the mini video (to be used if video mode and miniatures are used)
+        # DIRECTORY/video_full/recording_name/episodes/XXX/images_360_full.mp4 should contain the full video (to be used if video mode)
+        
+        if self.args.splitted_dataset:
+            dataset_dir = os.path.join(self.args.directory, "dataset", self.args.recording_name)
+            annotations_dir = os.path.join(self.args.directory, "annotations", self.args.recording_name)
+        else:
+            dataset_dir = os.path.join(self.args.directory, self.args.recording_name)
+            annotations_dir = os.path.join(self.args.directory, self.args.recording_name)
+
+        if not os.path.exists(dataset_dir):
+            prError(f"Recording name does not exist: {self.args.recording_name} in directory {self.args.directory} (looking for path {dataset_dir})")
             return episodes_list
         
-        if self.args.recording_name == "":
-            # Look for subdirectories that contain episodes
-            for recording_name in os.listdir(self.args.directory):
-                recording_path = os.path.join(self.args.directory, recording_name)
-                if os.path.isdir(recording_path):
-                    episodes_dir = os.path.join(recording_path, "episodes")
-                    episodes_desc_path = os.path.join(recording_path, "episodes.json") # this one is mandatory
-                    assert os.path.exists(episodes_desc_path), f"Episodes description file does not exist: {episodes_desc_path}"
-                    episodes_flags_path = os.path.join(recording_path, "episodes_flag.json")
-                    if os.path.exists(episodes_flags_path):
-                        episodes_flags_dict = read_json_to_dic(episodes_flags_path)
-                        prInfo(f"Got episodes flags: {episodes_flags_dict}")
-                    else:
-                        # no file found create if from episodes description
-                        self.create_episodes_flags_file(episodes_flags_path, episodes_desc_path)
-                        prSuccess(f"Created episodes flags file: {episodes_flags_path}")
-                    
-                    associated_episodes_flags_dict = read_json_to_dic(episodes_flags_path)
-                        
-                    if os.path.exists(episodes_dir):
-                        # Find episode subdirectories (like 0000)
-                        for ep in os.listdir(episodes_dir):
-                            ep_path = os.path.join(episodes_dir, ep)
-                            if os.path.isdir(ep_path) and ep.isdigit():
-                                episodes_list.append((recording_name, ep, associated_episodes_flags_dict))
+        episodes_dir = os.path.join(dataset_dir, "episodes")
+        episodes_desc_path = os.path.join(dataset_dir, "episodes.json") # this one is mandatory
+        assert os.path.exists(episodes_desc_path), f"Episodes description file does not exist: {episodes_desc_path}"
+        episodes_flags_path = os.path.join(dataset_dir, "episodes_flag.json")
+        if os.path.exists(episodes_flags_path):
+            episodes_flags_dict = read_json_to_dic(episodes_flags_path)
+            prInfo(f"Got episodes flags: {episodes_flags_dict}")
         else:
-            episodes_dir = os.path.join(self.args.directory, self.args.recording_name, "episodes")
-            episodes_desc_path = os.path.join(self.args.directory, self.args.recording_name, "episodes.json") # this one is mandatory
-            assert os.path.exists(episodes_desc_path), f"Episodes description file does not exist: {episodes_desc_path}"
-            episodes_flags_path = os.path.join(self.args.directory, self.args.recording_name, "episodes_flag.json")
-            if os.path.exists(episodes_flags_path):
-                episodes_flags_dict = read_json_to_dic(episodes_flags_path)
-                prInfo(f"Got episodes flags: {episodes_flags_dict}")
-            else:
-                # no file found create if from episodes description
-                self.create_episodes_flags_file(episodes_flags_path, episodes_desc_path)
-                prSuccess(f"Created episodes flags file: {episodes_flags_path}")
-            
-            associated_episodes_flags_dict = read_json_to_dic(episodes_flags_path)
-            
-            if os.path.exists(episodes_dir):
-                # Find episode subdirectories (like 0000)
-                for ep in os.listdir(episodes_dir):
-                    ep_path = os.path.join(episodes_dir, ep)
-                    if os.path.isdir(ep_path) and ep.isdigit():
-                        episodes_list.append((self.args.recording_name, ep, associated_episodes_flags_dict))
-                        
+            # no file found create if from episodes description
+            self.create_episodes_flags_file(episodes_flags_path, episodes_desc_path)
+            prSuccess(f"Created episodes flags file: {episodes_flags_path}")
+        
+        associated_episodes_flags_dict = read_json_to_dic(episodes_flags_path)
+        
+        if os.path.exists(episodes_dir):
+            # Find episode subdirectories (like 0000)
+            for ep in os.listdir(episodes_dir):
+                ep_path = os.path.join(episodes_dir, ep)
+                if os.path.isdir(ep_path) and ep.isdigit():
+                    episodes_list.append((self.args.recording_name, ep, associated_episodes_flags_dict))
+                    
         episodes_list.sort()
         prInfo(f"Found {len(episodes_list)} episodes")
         return episodes_list
@@ -1297,10 +1301,14 @@ class Interact360Visualizer(QMainWindow):
             return
             
         session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
-        episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
+        episode_dir = self.get_episode_dir(session, episode)
+        annotations_dir = self.get_annotations_dir(session, episode)
         
         # Store the episodes flags path for this episode
-        self.current_episodes_flags_path = os.path.join(self.args.directory, session, "episodes_flag.json")
+        if self.args.splitted_dataset:
+            self.current_episodes_flags_path = os.path.join(self.args.directory, "dataset", session, "episodes_flag.json")
+        else:
+            self.current_episodes_flags_path = os.path.join(self.args.directory, session, "episodes_flag.json")
         
         prInfo(f"Loading episode: {session}/{episode} | {associated_episodes_flags_dict[episode]['flag']}")
         
@@ -1310,17 +1318,10 @@ class Interact360Visualizer(QMainWindow):
         else:
             images_dir = os.path.join(episode_dir, "images_360")
         
-        
-        
-        #### JUST here harcoded to process images we cannot move locally
-        if self.args.use_images_from_remote_remove_storage:
-            # pass
-            images_dir = images_dir.replace("/media/raphael/hucedisk3/SSUP/FullVideos/", "/home/raphael/group_storage/rlorenzo/SSUP/FullVideos/")
-            
         self.image_files = self.get_image_files(images_dir)
         
         # Load detections
-        detection_file = os.path.join(episode_dir, "annotations_360.json")
+        detection_file = os.path.join(annotations_dir, "annotations_360.json")
         if os.path.exists(detection_file):
             detections_list = read_json_to_dic(detection_file)
             detections_list = self.reorder_detections_list(detections_list)
@@ -1389,9 +1390,11 @@ class Interact360Visualizer(QMainWindow):
         for i, (detection_entry, image_file) in enumerate(zip(detections_list, self.image_files)):
             det_image_file = detection_entry["image_file"]
             
-            # if os.path.basename(image_file) != os.path.basename(det_image_file):
-            #     print(f"[{i}] Image file: {os.path.basename(image_file)} vs detection: {os.path.basename(det_image_file)}")
-            assert(os.path.basename(image_file) == os.path.basename(det_image_file)), f"Image file: {os.path.basename(image_file)} vs detection: {os.path.basename(det_image_file)}"
+            if os.path.basename(image_file).startswith("frame_"):
+                # no check in this case, these are just ordered frames extracted from the video, before renaming, a bit more risky but it should be fine since the detections in the annotations should also be ordered
+                pass
+            else:
+                assert(os.path.basename(image_file) == os.path.basename(det_image_file)), f"Image file: {os.path.basename(image_file)} vs detection: {os.path.basename(det_image_file)}"
             
             detections_dict[i] = {
                 "image_file": detection_entry["image_file"],
@@ -2152,13 +2155,16 @@ class Interact360Visualizer(QMainWindow):
                 try:
                     # Create backup
                     session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
-                    episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
-                    detection_file = os.path.join(episode_dir, "annotations_360.json")
+                    annotations_dir = self.get_annotations_dir(session, episode)
+                    detection_file = os.path.join(annotations_dir, "annotations_360.json")
+                    
+                    # Ensure annotations directory exists
+                    os.makedirs(annotations_dir, exist_ok=True)
                     
                     if os.path.exists(detection_file):
                         # Create timestamped backup
                         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        backup_file = os.path.join(episode_dir, f"annotations_360_backup_{timestamp}.json")
+                        backup_file = os.path.join(annotations_dir, f"annotations_360_backup_{timestamp}.json")
                         import shutil
                         shutil.copy2(detection_file, backup_file)
                     
@@ -2967,13 +2973,16 @@ class Interact360Visualizer(QMainWindow):
         try:
             # Create backup
             session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
-            episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
-            detection_file = os.path.join(episode_dir, "annotations_360.json")
+            annotations_dir = self.get_annotations_dir(session, episode)
+            detection_file = os.path.join(annotations_dir, "annotations_360.json")
+            
+            # Ensure annotations directory exists
+            os.makedirs(annotations_dir, exist_ok=True)
             
             if os.path.exists(detection_file):
                 # Create timestamped backup
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_file = os.path.join(episode_dir, f"annotations_360_backup_{timestamp}.json")
+                backup_file = os.path.join(annotations_dir, f"annotations_360_backup_{timestamp}.json")
                 import shutil
                 shutil.copy2(detection_file, backup_file)
                 self.statusBar().showMessage(f"Backup created: {os.path.basename(backup_file)}")
@@ -3059,8 +3068,11 @@ class Interact360Visualizer(QMainWindow):
     def save_detections_to_file(self):
         """Save current detections to JSON file"""
         session, episode, associated_episodes_flags_dict = self.episodes_list[self.current_episode_idx]
-        episode_dir = os.path.join(self.args.directory, session, "episodes", episode)
-        detection_file = os.path.join(episode_dir, "annotations_360.json")
+        annotations_dir = self.get_annotations_dir(session, episode)
+        detection_file = os.path.join(annotations_dir, "annotations_360.json")
+        
+        # Ensure annotations directory exists
+        os.makedirs(annotations_dir, exist_ok=True)
         
         # Convert detections back to list format
         detections_list = []
@@ -3078,12 +3090,14 @@ def main():
     parser = argparse.ArgumentParser(description="Interact360 Visualizer")
     parser.add_argument("--directory", "-d", type=str, default="./demo/output/",
                        help="Output directory containing processed data (e.g., demo/output), default: %(default)s")
-    parser.add_argument("--recording_name", "-rn", type=str, default="",
+    parser.add_argument("--recording_name", "-rn", type=str, default="ClubInteract-TCAn",
                        help="Recording name to visualize, if not provided will visualize all recordings in the directory (default: %(default)s)")
     parser.add_argument("--miniatures", "-mini", action="store_true", default=False,
                        help="Use miniature images (4x smaller) from images_360_miniatures_scale_4 (default: %(default)s)")
-    parser.add_argument("--use_images_from_remote_remove_storage", "-rgs", action="store_true", default=False,
-                       help="Use images from remote group storage (default: %(default)s)")
+    parser.add_argument("--splitted_dataset", "-sd", action="store_true", default=False,
+                       help="Use splitted dataset mode, the data and the annotations are separated into different directories (default: %(default)s)")
+    # parser.add_argument("--video_mode", "-vm", action="store_true", default=False,
+    #                    help="Use video mode, load videos (full or mini) instead of images for display (default: %(default)s)")
     args = parser.parse_args()
     
     # Validate arguments
