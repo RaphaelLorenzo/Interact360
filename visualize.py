@@ -1368,44 +1368,66 @@ class Interact360Visualizer(QMainWindow):
                         
                         prInfo(f"Video properties: {width}x{height}, {fps} fps, {frame_count} frames")
                         
-                        # Decode all frames
-                        frames_list = []
-                        frame_idx = 0
-                        while True:
-                            ret, frame = self.video_cap.read()
-                            if not ret:
-                                break
-                            
-                            # OpenCV returns frames in BGR format, which is what we need
-                            # Frame is already uint8 numpy array in (H, W, C) format
-                            frames_list.append(frame.copy())
-                            frame_idx += 1
-                            
-                            # Progress indicator for long videos
-                            if frame_idx % 100 == 0:
-                                prInfo(f"Loaded {frame_idx}/{frame_count} frames...")
-                        
-                        # Release the VideoCapture as we've loaded all frames
-                        self.video_cap.release()
-                        self.video_cap = None
-                        
-                        self.video_frames = frames_list
+                        # Create dummy image_files list for compatibility (using frame indices)
+                        self.image_files = [f"frame_{i:06d}" for i in range(frame_count)]
                         self.video_path = video_path
                         
-                        # Create dummy image_files list for compatibility (using frame indices)
-                        self.image_files = [f"frame_{i:06d}" for i in range(len(self.video_frames))]
-                        prInfo(f"Loaded {len(self.video_frames)} frames from video")
-                        
-                        # Set image dimensions from first frame
-                        if self.video_frames:
-                            self.image_height, self.image_width = self.video_frames[0].shape[:2]
-                            if self.use_mini:
+                        # For mini videos: load all frames into memory (low memory footprint)
+                        # For full resolution: keep VideoCapture open and decode frames on-demand
+                        if self.use_mini:
+                            prInfo("Loading all frames into memory (mini video - low memory usage)")
+                            frames_list = []
+                            frame_idx = 0
+                            while True:
+                                ret, frame = self.video_cap.read()
+                                if not ret:
+                                    break
+                                
+                                # OpenCV returns frames in BGR format, which is what we need
+                                # Frame is already uint8 numpy array in (H, W, C) format
+                                frames_list.append(frame.copy())
+                                frame_idx += 1
+                                
+                                # Progress indicator for long videos
+                                if frame_idx % 100 == 0:
+                                    prInfo(f"Loaded {frame_idx}/{frame_count} frames...")
+                            
+                            # Release the VideoCapture as we've loaded all frames
+                            self.video_cap.release()
+                            self.video_cap = None
+                            
+                            self.video_frames = frames_list
+                            prInfo(f"Loaded {len(self.video_frames)} frames from video into memory")
+                            
+                            # Set image dimensions from first frame
+                            if self.video_frames:
+                                self.image_height, self.image_width = self.video_frames[0].shape[:2]
                                 self.full_image_height = int(self.image_height * self.scale_factor)
                                 self.full_image_width = int(self.image_width * self.scale_factor)
-                            else:
+                                prInfo(f"Video dimensions: {self.image_width}x{self.image_height} (full: {self.full_image_width}x{self.full_image_height})")
+                        else:
+                            # Full resolution: decode frames on-demand to save memory
+                            prInfo("Using on-demand frame decoding for full resolution video (saves memory)")
+                            
+                            # Read first frame to get dimensions
+                            ret, first_frame = self.video_cap.read()
+                            if ret:
+                                self.image_height, self.image_width = first_frame.shape[:2]
                                 self.full_image_height = self.image_height
                                 self.full_image_width = self.image_width
-                            prInfo(f"Video dimensions: {self.image_width}x{self.image_height} (full: {self.full_image_width}x{self.full_image_height})")
+                                prInfo(f"Video dimensions: {self.image_width}x{self.image_height}")
+                                
+                                # Reset to beginning of video
+                                self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            else:
+                                prError("Failed to read first frame from video")
+                                self.video_cap.release()
+                                self.video_cap = None
+                                self.image_files = []
+                            
+                            # Keep video_cap open for on-demand reading
+                            # video_frames will be None to indicate on-demand mode
+                            self.video_frames = None
                 
                 except Exception as e:
                     prError(f"Failed to load video: {e}")
@@ -1444,7 +1466,7 @@ class Interact360Visualizer(QMainWindow):
             prWarning(f"No detection file found: {detection_file}")
         
         # Load interact zone tracking if available
-        self.load_interact_zone_tracking(episode_dir)
+        self.load_interact_zone_tracking(annotations_dir)
         
         # Update UI
         self.update_slider()
@@ -1685,10 +1707,27 @@ class Interact360Visualizer(QMainWindow):
         tic = time.time()
         if self.video_mode:
             # Get frame from video
-            if self.video_frames is None or self.current_frame >= len(self.video_frames):
-                prError(f"Video frame {self.current_frame} not available")
+            if self.video_frames is not None:
+                # Mini video: frames are pre-loaded in memory
+                if self.current_frame >= len(self.video_frames):
+                    prError(f"Video frame {self.current_frame} not available")
+                    return
+                image = self.video_frames[self.current_frame].copy()
+            elif self.video_cap is not None:
+                # Full resolution: decode frame on-demand
+                if self.current_frame >= len(self.image_files):
+                    prError(f"Video frame {self.current_frame} not available")
+                    return
+                
+                # Seek to the requested frame
+                self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+                ret, image = self.video_cap.read()
+                if not ret:
+                    prError(f"Failed to read frame {self.current_frame} from video")
+                    return
+            else:
+                prError("Video not loaded properly")
                 return
-            image = self.video_frames[self.current_frame].copy()
         else:
             # Load image from file
             image_file = self.image_files[self.current_frame]
