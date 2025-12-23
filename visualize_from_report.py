@@ -3810,12 +3810,12 @@ def main():
                        help="Use splitted dataset mode, the data and the annotations are separated into different directories (default: %(default)s)")
     parser.add_argument("--video_mode", "-vm", action="store_true", default=False,
                        help="Use video mode, load videos (full or mini) instead of images for display (default: %(default)s)")
-    parser.add_argument("--select_tracks_from_report", type=str, default=None,
+    parser.add_argument("--select_tracks_from_report", "-stfr", type=str, default=None,
                        help="Path to report YAML file to filter tracks based on prediction results")
-    parser.add_argument("--select_tracks_based_on_prediction", type=str, default="all",
+    parser.add_argument("--select_tracks_based_on_prediction", "-stbp", type=str, default="all",
                        choices=["tp", "fp", "tn", "fn", "all"],
                        help="Filter tracks based on prediction status: tp (true positive), fp (false positive), tn (true negative), fn (false negative), or all (default: %(default)s)")
-    parser.add_argument("--prediction_threshold", type=float, default=None,
+    parser.add_argument("--prediction_threshold", "-pt", type=float, default=None,
                        help="Custom threshold for predicted_score to determine predicted_label. If provided, predicted_label = 1 if predicted_score >= threshold, else 0. If not provided, uses predicted_label from report (default: %(default)s)")
     args = parser.parse_args()
 
