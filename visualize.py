@@ -939,6 +939,13 @@ class Interact360Visualizer(QMainWindow):
 
         if not os.path.exists(dataset_dir):
             prError(f"Recording name does not exist: {self.args.recording_name} in directory {self.args.directory} (looking for path {dataset_dir})")
+            
+            # print available recording names
+            print("Available recording names:")
+            for recording_name in os.listdir(os.path.join(self.args.directory, "dataset")):
+                if os.path.isdir(os.path.join(self.args.directory, "dataset", recording_name)):
+                    print(f"{recording_name}")
+            
             return episodes_list
         
         episodes_dir = os.path.join(dataset_dir, "episodes")
