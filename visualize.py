@@ -724,7 +724,7 @@ class EpisodePreloadWorker(QThread):
                 return
             
             # Load video frames if video_mode and mini
-            video_frames = None
+            video_frames = []
             video_cap = None
             video_path = None
             
@@ -1699,8 +1699,9 @@ class Interact360Visualizer(QMainWindow):
             self.initialize_edited_detections()
             self.calculate_next_available_id()
         
-        # Trigger preload of next episode
-        self.preload_next_episode()
+        if self.use_mini:
+            # Trigger preload of next episode
+            self.preload_next_episode()
 
     
     def stop_preload_worker(self):
@@ -2032,7 +2033,7 @@ class Interact360Visualizer(QMainWindow):
         tic = time.time()
         if self.video_mode:
             # Get frame from video
-            if self.video_frames is not None:
+            if self.video_frames is not None and len(self.video_frames) > 0:
                 # Mini video: frames are pre-loaded in memory
                 if self.current_frame >= len(self.video_frames):
                     prError(f"Video frame {self.current_frame} not available")
@@ -2347,13 +2348,15 @@ class Interact360Visualizer(QMainWindow):
                         pose_color = (255, 255, 255) if self.mask_opacity > 80 else color  # White if high opacity
                         
                         # Draw keypoints
+                        point_radius = 3 if self.use_mini else 10
                         for i in range(keypoints.shape[0]):
                             if i < len(scores_vitpose) and scores_vitpose[i] > self.vitpose_min_score:
                                 kp_x, kp_y = int(keypoints[i, 0] / self.scale_factor), int(keypoints[i, 1] / self.scale_factor)
                                 if kp_x > 0 and kp_y > 0:
-                                    cv2.circle(image_copy, (kp_x, kp_y), 10, pose_color, -1)
+                                    cv2.circle(image_copy, (kp_x, kp_y), point_radius, pose_color, -1)
                         
                         # Draw skeleton connections
+                        line_thickness = 1 if self.use_mini else 2
                         for edge in COCO_EDGES:
                             if (edge[0] < len(scores_vitpose) and edge[1] < len(scores_vitpose) and 
                                 scores_vitpose[edge[0]] > self.vitpose_min_score and scores_vitpose[edge[1]] > self.vitpose_min_score):
@@ -2363,7 +2366,7 @@ class Interact360Visualizer(QMainWindow):
                                 if abs(pt1[0] - pt2[0]) > image_width // 4:
                                     continue
                                 if pt1[0] > 0 and pt1[1] > 0 and pt2[0] > 0 and pt2[1] > 0:
-                                    cv2.line(image_copy, pt1, pt2, pose_color, 2)
+                                    cv2.line(image_copy, pt1, pt2, pose_color, line_thickness)
             
             # Draw Sapiens keypoints and skeleton if enabled
             if self.show_sapiens_poses:
@@ -2382,14 +2385,16 @@ class Interact360Visualizer(QMainWindow):
                         sapiens_keypoints = np.array(sapiens_keypoints).reshape(sapiens_num_keypoints, 2)
                         
                         # Draw keypoints
+                        point_radius = 1 if self.use_mini else 3
                         for i in range(sapiens_keypoints.shape[0]):
                             if sapiens_scores[i] > self.sapiens_min_score:
                                 kpt_color = GOLIATH_KPTS_COLORS[i]
                                 kp_x, kp_y = int(sapiens_keypoints[i, 0] / self.scale_factor), int(sapiens_keypoints[i, 1] / self.scale_factor)
                                 if kp_x > 0 and kp_y > 0:
-                                    cv2.circle(image_copy, (kp_x, kp_y), 3, kpt_color, -1)
+                                    cv2.circle(image_copy, (kp_x, kp_y), point_radius, kpt_color, -1)
                                 
                         # Draw skeleton connections
+                        line_thickness = 1 if self.use_mini else 2
                         for edge_idx in GOLIATH_SKELETON_INFO:
                             edge = GOLIATH_SKELETON_INFO[edge_idx]
                             kp1_score = sapiens_scores[edge["link"][0]]
@@ -2401,7 +2406,7 @@ class Interact360Visualizer(QMainWindow):
                                 if abs(kp_x1 - kp_x2) > image_width // 4:
                                     continue
                                 if kp_x1 > 0 and kp_y1 > 0 and kp_x2 > 0 and kp_y2 > 0:
-                                    cv2.line(image_copy, (kp_x1, kp_y1), (kp_x2, kp_y2), edge_color, 2)
+                                    cv2.line(image_copy, (kp_x1, kp_y1), (kp_x2, kp_y2), edge_color, line_thickness)
         
         return image_copy
     
