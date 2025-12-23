@@ -300,7 +300,94 @@ If a keypoint is not present it means that these keypoints were not extracted, p
 ]
 ```
 
+<details>
+<summary>Exporting to HUI360 Format</summary>
 
+How to export to the csv format of HUI360
+TBD
+
+</details>
+
+<details>
+<summary>Exporting to HUI360-Video Format</summary>
+
+How to export (restructure) to the HUI360-Video Format
+
+The original structure is separated, videos are re-created for easier downloading :
+
+```
+HUI360-Video/
+├── annotations
+│   ├── MyFirstPanoVideoName
+│   │   └── episodes
+│   │       ├── 0000
+│   │       │   ├── annotations_360.json
+│   │       │   ├── images_360_filenames.txt
+│   │       │   └── interaction_zone_tracking_360.json
+|   |       ...  
+│   │       └── 0001
+│   │           ├── ...
+│   │           └── ...
+│   ...
+│   └── AnotherPanoVideoName
+│       └── episodes
+│           ├── ...
+│           └── ...
+├── dataset
+│   ├── MyFirstPanoVideoName
+│   │   ├── episodes
+│   │   │   ├── 0000
+│   │   │   │   └── images_360
+│   │   │   │       ├── ...
+│   │   │   │       ├── ...
+│   │   │   │       ├── ...
+│   │   │   │       └── ...
+|   |   |   ...  
+│   │   │   └── 0001
+│   │   │       └── ...
+|   │   ├── episodes_flag.json
+│   │   └── episodes.json
+│   ...
+│   └── AnotherPanoVideoName
+│       ├── episodes
+│       ...
+|       ├── episodes_flag.json
+│       └── episodes.json
+├── README.md
+├── video_full
+│   ├── MyFirstPanoVideoName
+│   │   └── episodes
+│   │       ├── 0000
+│   │       │   └── images_360_full.mp4
+|   |       ...  
+│   │       └── 0001
+│   │           ├── ...
+│   │           └── ...
+│   ...
+│   └── AnotherPanoVideoName
+│       └── episodes
+│           ├── ...
+│           └── ...
+└── video_mini
+    ├── MyFirstPanoVideoName
+    │   └── episodes
+    │       ├── 0000
+    │       │   └── images_360_mini.mp4
+    |       ...  
+    │       └── 0001
+    │           ├── ...
+    │           └── ...
+    ...
+    └── AnotherPanoVideoName
+        └── episodes
+            ├── ...
+            └── ...
+```
+
+
+TBD
+
+</details>
 
 
 3. Manual correction and visualization tool (`visualize.py`) will create a dictionnary indexed by the episode name with the flags of the episodes (valid by default but can be modified in the tool), 
