@@ -2654,19 +2654,26 @@ class Interact360Visualizer(QMainWindow):
                         shutil.copy2(detection_file, backup_file)
                     
                     # Apply changes to original detections
+                    has_changes = False
                     for frame_idx, frame_data in self.edited_detections.items():
                         if frame_idx in self.detections:
-                            # Replace original detections with edited ones
-                            self.detections[frame_idx]["detections"] = frame_data["detections"]
-                    
+                            if self.detections[frame_idx]["detections"] != frame_data["detections"]:
+                                has_changes = True
+                                # Replace original detections with edited ones
+                                self.detections[frame_idx]["detections"] = frame_data["detections"]
+                        
                     # Save to file
-                    self.save_detections_to_file()
-                    
+                    if has_changes:
+                        self.save_detections_to_file()
+                        self.statusBar().showMessage("Changes saved automatically before switching episode")
+                        prInfo("Changes saved automatically before switching episode")
+                    else:
+                        self.statusBar().showMessage("No changes to save automatically before switching episode")
+                        prInfo("No changes to save automatically before switching episode")
+                        
                     # Clear edited detections
                     self.edited_detections = {}
                     
-                    self.statusBar().showMessage("Changes saved automatically before switching episode")
-                    prInfo("Changes saved automatically before switching episode")
                 except Exception as e:
                     prError(f"Failed to save changes automatically: {str(e)}")
                     # Reset combo box to current episode on error
@@ -3465,7 +3472,7 @@ class Interact360Visualizer(QMainWindow):
     
     def save_changes(self):
         """Save edited detections to file with backup"""
-        if not self.edited_detections:
+        if not self.edited_detections or self.edited_detections == {}:
             QMessageBox.information(self, "No Changes", "No changes to save.")
             return
         
@@ -3581,8 +3588,8 @@ class Interact360Visualizer(QMainWindow):
                 detections_list.append(frame_data)
         
         # Write to file
-        with open(detection_file, 'w') as f:
-            json.dump(detections_list, f, indent=2)
+        write_dic_to_json_file(detections_list, detection_file)
+        # json.dump(detections_list, f, indent=2)
 
 
 def main():
