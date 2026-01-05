@@ -72,7 +72,7 @@ def check_recording_validity(args, dataset_recording_dir, annotations_recording_
             # ignore the full episode
             continue
         else:
-            n_valid_episodes += 1
+            pass
     
         # check that we have the necessary inputs in the episode
         episode_dir = os.path.join(annotations_recording_dir, "episodes", episode_name)
@@ -85,7 +85,12 @@ def check_recording_validity(args, dataset_recording_dir, annotations_recording_
             
         # read the detections
         detections_path = os.path.join(episode_dir, "annotations_360.json")
-        detections_dict = read_json_to_dic(detections_path)
+        try:
+            detections_dict = read_json_to_dic(detections_path)
+        except Exception as e:
+            # potentially corrupted file, skip it
+            prError(f"Error reading detections file {detections_path}: {e}")
+            continue
         
         # eventually check that the images exist and that the number of detections and images is the same except if we allow empty dirs to work only with labels
         images_dir = os.path.join(episode_dir, "images_360")
@@ -111,7 +116,8 @@ def check_recording_validity(args, dataset_recording_dir, annotations_recording_
                     assert key in det.keys(), "[{}][{}][{}][{} - track_id : {}] Key {} not found in detection (got : {}, validity : {}, image_file : {})".format(os.path.basename(dataset_recording_dir), episode_name, image_idx, det_idx, track_id, key, det.keys(), validity, image_file)
         
         # print(os.path.basename(dataset_recording_dir), episode_name, "valid")
-    
+        n_valid_episodes += 1
+        
     if n_valid_episodes == 0:
         prWarning("No valid episodes found in recording {}, will not export it".format(os.path.basename(dataset_recording_dir)))
     else:
