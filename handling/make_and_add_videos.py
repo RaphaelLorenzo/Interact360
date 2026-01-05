@@ -11,16 +11,10 @@ sys.path.append(os.path.join(here))
 
 from misc.print_utils import *
 from misc.other_utils import *
-import socket
-hostname = socket.gethostname()
-if hostname == "raphael-Precision-3591":
-    DATA_DIRECTORY_EPISODES = "/media/raphael/hucedisk/ShelfyInteractFull/data_extractor/"
-    # DATA_DIRECTORY_EPISODES = "/media/raphael/hucedisk3/ShelfyDatasetNameNextExtension/data_extractor/"
-    OUTPUT_DIRECTORY = "/media/raphael/hucedisk3/HUI360-Videos/"
-else:
-    DATA_DIRECTORY_EPISODES = "/home/rlorenzo/group_storage/rlorenzo/SSUP/FullVideos/extracted"
-    OUTPUT_DIRECTORY = "/home/rlorenzo/group_storage/rlorenzo/HUI360-Videos/"
+import argparse
 
+DATA_DIRECTORY_EPISODES = None
+OUTPUT_DIRECTORY = None
 
 def create_video_from_images(images_dir, output_dir, output_filename, recording_name, episode_name):
     """Create a video from images using ffmpeg and move it to the output directory.
@@ -127,63 +121,76 @@ def process_episode(args_tuple):
     
     return recording_name, episode_name, len(images_360_basenames)
 
-recordings_list_episodes_json = os.listdir(DATA_DIRECTORY_EPISODES)
-recordings_list_episodes_json.sort()
 
-if not os.path.exists(OUTPUT_DIRECTORY):
-    os.makedirs(os.path.join(OUTPUT_DIRECTORY, "recordings"))
-
-UNEXPORTED_RECORDINGS = ["rosbag2_2025_10_07-16_00_15"]
-
-# Prepare all episodes for processing
-all_episodes = []
-for recording_name in recordings_list_episodes_json:
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset_directory", "-dd", type=str, default="/media/raphael/hucedisk/ShelfyInteractFull/data_extractor/", help="Dataset directory containing the episodes (default: %(default)s)")
+    parser.add_argument("--output_directory", "-od", type=str, default="/media/raphael/hucedisk3/HUI360-Videos/", help="Output directory for the videos (default: %(default)s)")
+    args = parser.parse_args()
     
-    if recording_name in UNEXPORTED_RECORDINGS:
-        #or ("ShelfyInteractFull" in DATA_DIRECTORY_EPISODES and (recording_name.startswith("rosbag2_2025_07") or recording_name.startswith("rosbag2_2025_10_17") or recording_name.startswith("rosbag2_2025_10_20"))):
-        prWarning(f"Skipping unexported recording: {recording_name}")
-        continue
+    DATA_DIRECTORY_EPISODES = args.dataset_directory
+    OUTPUT_DIRECTORY = args.output_directory
     
-    # episodes_flags_json_path = os.path.join(DATA_DIRECTORY_EPISODES, recording_name, "episodes_flag.json")
-    # episodes_flags_json_dict = read_json_to_dic(episodes_flags_json_path)
-    episodes_json_path = os.path.join(DATA_DIRECTORY_EPISODES, recording_name, "episodes.json")
-    episodes_json_dict = read_json_to_dic(episodes_json_path)
+    assert(os.path.exists(DATA_DIRECTORY_EPISODES)), f"Dataset directory does not exist: {DATA_DIRECTORY_EPISODES}"
+    assert(os.path.exists(OUTPUT_DIRECTORY)), f"Output directory does not exist: {OUTPUT_DIRECTORY}"
+        
+    recordings_list_episodes_json = os.listdir(DATA_DIRECTORY_EPISODES)
+    recordings_list_episodes_json.sort()
 
-    for idx, ep in enumerate(episodes_json_dict):
-        all_episodes.append((recording_name, f"{idx:04d}"))
+    if not os.path.exists(OUTPUT_DIRECTORY):
+        os.makedirs(os.path.join(OUTPUT_DIRECTORY, "recordings"))
 
-# Process episodes in parallel using half the available cores
-num_workers = 1 # max(1, mp.cpu_count() // 2)
-num_workers = min(num_workers, len(all_episodes))
-prInfo(f"Processing {len(all_episodes)} episodes using {num_workers} workers")
+    UNEXPORTED_RECORDINGS = ["rosbag2_2025_10_07-16_00_15"]
 
-if num_workers > 1:
-    pool = None
-    try:
-        pool = mp.Pool(processes=num_workers)
-        results = pool.map(process_episode, all_episodes)
-        prSuccess(f"Successfully processed {len(results)} episodes with {sum([result[2] for result in results])} frames")
-    except KeyboardInterrupt:
-        prWarning("Keyboard interrupt received. Shutting down pool gracefully...")
-        if pool is not None:
-            pool.terminate()
-            pool.join()
-        prWarning("Pool terminated. Exiting.")
-        sys.exit(0)
-    except Exception as e:
-        prError(f"Error during parallel processing: {e}")
-        if pool is not None:
-            pool.terminate()
-            pool.join()
-        raise
-    finally:
-        if pool is not None:
-            pool.close()
-            pool.join()
-else:
-    prInfo(f"Processing {len(all_episodes)} episodes sequentially")
-    total_frames = 0
-    for episode in all_episodes:
-        recording_name, episode_name, frames = process_episode(episode)
-        total_frames += frames
-    prSuccess(f"Successfully processed {len(all_episodes)} episodes with {total_frames} frames")
+    # Prepare all episodes for processing
+    all_episodes = []
+    for recording_name in recordings_list_episodes_json:
+        
+        if recording_name in UNEXPORTED_RECORDINGS:
+            #or ("ShelfyInteractFull" in DATA_DIRECTORY_EPISODES and (recording_name.startswith("rosbag2_2025_07") or recording_name.startswith("rosbag2_2025_10_17") or recording_name.startswith("rosbag2_2025_10_20"))):
+            prWarning(f"Skipping unexported recording: {recording_name}")
+            continue
+        
+        # episodes_flags_json_path = os.path.join(DATA_DIRECTORY_EPISODES, recording_name, "episodes_flag.json")
+        # episodes_flags_json_dict = read_json_to_dic(episodes_flags_json_path)
+        episodes_json_path = os.path.join(DATA_DIRECTORY_EPISODES, recording_name, "episodes.json")
+        episodes_json_dict = read_json_to_dic(episodes_json_path)
+
+        for idx, ep in enumerate(episodes_json_dict):
+            all_episodes.append((recording_name, f"{idx:04d}"))
+
+    # Process episodes in parallel using half the available cores
+    num_workers = 1 # max(1, mp.cpu_count() // 2)
+    num_workers = min(num_workers, len(all_episodes))
+    prInfo(f"Processing {len(all_episodes)} episodes using {num_workers} workers")
+
+    if num_workers > 1:
+        pool = None
+        try:
+            pool = mp.Pool(processes=num_workers)
+            results = pool.map(process_episode, all_episodes)
+            prSuccess(f"Successfully processed {len(results)} episodes with {sum([result[2] for result in results])} frames")
+        except KeyboardInterrupt:
+            prWarning("Keyboard interrupt received. Shutting down pool gracefully...")
+            if pool is not None:
+                pool.terminate()
+                pool.join()
+            prWarning("Pool terminated. Exiting.")
+            sys.exit(0)
+        except Exception as e:
+            prError(f"Error during parallel processing: {e}")
+            if pool is not None:
+                pool.terminate()
+                pool.join()
+            raise
+        finally:
+            if pool is not None:
+                pool.close()
+                pool.join()
+    else:
+        prInfo(f"Processing {len(all_episodes)} episodes sequentially")
+        total_frames = 0
+        for episode in all_episodes:
+            recording_name, episode_name, frames = process_episode(episode)
+            total_frames += frames
+        prSuccess(f"Successfully processed {len(all_episodes)} episodes with {total_frames} frames")
