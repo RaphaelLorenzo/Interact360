@@ -438,13 +438,23 @@ def get_episode_data(args, dataset_recording_dir, annotations_recording_dir, ep)
 
     return tracks_df.copy()
 
-def get_recording_data(args, dataset_recording_dir, annotations_recording_dir=None):
+def get_episode_data_wrapper(episode_args):
+    """Wrapper function for multiprocessing get_episode_data"""
+    args, dataset_recording_dir, annotations_recording_dir, episode_name = episode_args
+    episode_df = get_episode_data(args, dataset_recording_dir, annotations_recording_dir, episode_name)
+    prSuccess(f"[{os.path.basename(dataset_recording_dir)}][{episode_name}] Got episode_df of length {len(episode_df)}")
+    return episode_name, episode_df
+
+def get_recording_data(args, dataset_recording_dir, annotations_recording_dir=None, workers=1):
     """ For each episode call get_episode_data and concatenate the data of the episodes
+    
+    Parallelizes at the episode level.
 
     Args:
         args (argparse.Namespace): Arguments
         dataset_recording_dir (str): Path to the dataset recording directory (contains episodes_flag.json)
         annotations_recording_dir (str): Path to the annotations recording directory (contains episodes with detections), defaults to dataset_recording_dir if None
+        workers (int): Number of workers to use for episode-level parallelization
 
     Returns:
         pd.DataFrame: DataFrame for all the episodes of the recording with each line corresponding to one timestep and the columns being features (keypoints, box coordinates, scores, etc.)
@@ -457,21 +467,37 @@ def get_recording_data(args, dataset_recording_dir, annotations_recording_dir=No
     assert os.path.exists(episodes_flags_path), "Episodes flags file does not exist at {}".format(episodes_flags_path)
     episodes_flags = read_json_to_dic(episodes_flags_path)
     
-    episodes_dfs_list = []
+    # Build list of valid episodes to process
+    valid_episode_args = []
     for episode_name, episode_data in episodes_flags.items():
         valid_flags = is_episode_usable(args, episode_data["flag"])
         if not valid_flags:
             continue
+        valid_episode_args.append((args, dataset_recording_dir, annotations_recording_dir, episode_name))
+    
+    if len(valid_episode_args) == 0:
+        prWarning("No valid episodes found in recording {}, will not export it".format(os.path.basename(dataset_recording_dir)))
+        return pd.DataFrame()
+    
+    # Process episodes in parallel
+    prInfo(f"[{os.path.basename(dataset_recording_dir)}] Processing {len(valid_episode_args)} episodes with {workers} workers")
+    
+    episodes_dfs_list = []
+    if workers > 1:
+        with mp.Pool(processes=workers) as pool:
+            episode_results = pool.map(get_episode_data_wrapper, valid_episode_args)
         
-        episode_df = get_episode_data(args, dataset_recording_dir, annotations_recording_dir, episode_name)
-        prSuccess(f"[{dataset_recording_dir}][{episode_name}] Got episode_df of length {len(episode_df)}")
-        if len(episode_df) > 0:
-            # sometimes not a single track is valid, so we need to check
-            episode_df.insert(0, "recording", os.path.basename(dataset_recording_dir))
-            episodes_dfs_list.append(episode_df.copy())
-        else:
-            pass
-            # prWarning("No valid tracks found in episode {}, will not export it".format(episode_name))
+        for episode_name, episode_df in episode_results:
+            if len(episode_df) > 0:
+                episode_df.insert(0, "recording", os.path.basename(dataset_recording_dir))
+                episodes_dfs_list.append(episode_df.copy())
+    else:
+        # Sequential processing
+        for episode_args in valid_episode_args:
+            episode_name, episode_df = get_episode_data_wrapper(episode_args)
+            if len(episode_df) > 0:
+                episode_df.insert(0, "recording", os.path.basename(dataset_recording_dir))
+                episodes_dfs_list.append(episode_df.copy())
     
     if len(episodes_dfs_list) == 0:
         prWarning("No valid episodes found in recording {}, will not export it, all tracks, all episodes were invalid".format(os.path.basename(dataset_recording_dir)))
@@ -484,11 +510,6 @@ def check_recording_validity_wrapper(args_and_dirs):
     """Wrapper function for multiprocessing check_recording_validity"""
     args, dataset_recording_dir, annotations_recording_dir = args_and_dirs
     return check_recording_validity(args, dataset_recording_dir, annotations_recording_dir)
-
-def get_recording_data_wrapper(args_and_dirs):
-    """Wrapper function for multiprocessing get_recording_data"""
-    args, dataset_recording_dir, annotations_recording_dir = args_and_dirs
-    return get_recording_data(args, dataset_recording_dir, annotations_recording_dir)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -555,25 +576,9 @@ if __name__ == "__main__":
         prWarning("No valid recordings found, exiting...")
         exit(1)
     
-    # Get recording data (i.e. extract tracks)
-    prInfo("Getting recording data in parallel...")
-                
-    with mp.Pool(processes=args.workers) as pool:
-    # with mp.Pool(processes=1) as pool:
-        # Get recording data
-        recording_data_results = pool.map(get_recording_data_wrapper, valid_recording_args_list)
-        
-    # Process results
-    recordings_dfs_list = []
-    
-    for recording, recording_df in zip(valid_recordings, recording_data_results):
-        prSuccess(f"Got data for recording {recording} (entries : {len(recording_df)}, unique tracks : {len(recording_df['unique_track_identifier'].unique()) if len(recording_df) > 0 else 0})")
-        recordings_dfs_list.append(recording_df)
-
-    assert len(recordings_dfs_list) > 0, "No recordings found or all invalid"
+    # Create output directory before processing
     timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     dataset_name = f"exported_dataset_{args.input}_{timestamp}"
-    # save the dataset in a directory
     dirname = args.dir.split("/")[-1] if args.dir.split("/")[-1] != "" else args.dir.split("/")[-2]
     dataset_dir = os.path.join(args.dir, "..", dirname+"_exported_datasets", dataset_name)
     if not os.path.exists(os.path.join(args.dir, "..", dirname+"_exported_datasets")):
@@ -581,14 +586,33 @@ if __name__ == "__main__":
         os.makedirs(os.path.join(args.dir, "..", dirname+"_exported_datasets"))
     os.makedirs(dataset_dir, exist_ok=True)
     
-    for count, recording_df in enumerate(recordings_dfs_list):
-        recording_name = recording_df["recording"].unique()[0]
-        save_recording_name = f"ssupaug-{count:04d}-of-{len(recordings_dfs_list):04d}.csv"
-        recording_df.to_csv(os.path.join(dataset_dir, save_recording_name), index=False)
-        prSuccess(f"Saved recording {recording_name} to {save_recording_name}")
-
-    # dataset_path = os.path.join(dataset_dir, f"dataset.csv")
-    # recordings_df.to_csv(dataset_path, index=False)
-    # prSuccess(f"Exported data to {dataset_path} (entries : {len(recordings_df)}, unique tracks : {len(recordings_df['unique_track_identifier'].unique())})")
-
-    prSuccess(f"Exported dataset to {dataset_dir}")
+    # Process recordings sequentially, parallelize at episode level, save immediately to free RAM
+    prInfo(f"Processing {len(valid_recordings)} recordings sequentially (parallelizing at episode level with {args.workers} workers)")
+    
+    total_recordings = len(valid_recording_args_list)
+    saved_count = 0
+    
+    for count, (recording, (args_item, dataset_recording_dir, annotations_recording_dir)) in enumerate(zip(valid_recordings, valid_recording_args_list)):
+        prInfo(f"[{count+1}/{total_recordings}] Processing recording {recording}...")
+        
+        # Get recording data with episode-level parallelization
+        recording_df = get_recording_data(args_item, dataset_recording_dir, annotations_recording_dir, workers=args.workers)
+        
+        if len(recording_df) > 0:
+            prSuccess(f"Got data for recording {recording} (entries : {len(recording_df)}, unique tracks : {len(recording_df['unique_track_identifier'].unique())})")
+            
+            # Save immediately to free RAM
+            save_recording_name = f"data-{recording}-{count:04d}-of-{total_recordings:04d}.csv"
+            recording_df.to_csv(os.path.join(dataset_dir, save_recording_name), index=False)
+            prSuccess(f"Saved recording {recording} to {save_recording_name}")
+            saved_count += 1
+            
+            # Free memory
+            del recording_df
+        else:
+            prWarning(f"Recording {recording} has no valid data, skipping save")
+    
+    if saved_count == 0:
+        prWarning("No recordings with valid data were saved")
+    else:
+        prSuccess(f"Exported {saved_count} recordings to {dataset_dir}")
