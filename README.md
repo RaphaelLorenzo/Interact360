@@ -15,8 +15,15 @@ sudo apt-get install ffmpeg
 ```
 conda create --name interact360env python=3.10
 conda activate interact360env
-pip install -r requirements.txt
+
+# Core packages only (without GUI visualization tools)
+pip install .
+
+# OR full installation (includes PyQt6 and pyqtgraph for visualize.py)
+pip install .[gui]
 ```
+
+> **Note:** The `[gui]` extra is only required if you want to use the visualization tool (`visualize.py`). All processing scripts work with the core installation.
 
 - Download the checkpoints (by default it will download necessary checkpoints for `SAM2.1-Tiny` and `Sapiens-03b`)
 ```
@@ -57,7 +64,7 @@ Extract keypoints with Sapiens (308 keypoints)
 python ./process/extract_poses_sapiens.py -d ./demo/output/ClubInteract-TCAn
 ```
 
-Then you can see the results in the visualizer
+Then you can see the results in the visualizer (requires GUI packages, see [Install](#install))
 ```
 python visualize.py -d ./demo/output -rn ClubInteract-TCAn
 ```
