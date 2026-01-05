@@ -32,8 +32,6 @@ import argparse
 import os
 import sys
 
-# from cv2.gapi.ot import track
-import cv2
 here = os.path.dirname(__file__)
 sys.path.append(os.path.join(here, '../'))
 
@@ -42,23 +40,26 @@ from misc.other_utils import *
 from export.export_utils import get_tracks_infos, is_episode_usable, get_contiguous_true_segments, get_image_timestamp, get_image_shape
 import pandas as pd
 import datetime
-import shutil
 import multiprocessing as mp
 import numpy as np
 
-def check_recording_validity(args, recording_dir):
+def check_recording_validity(args, dataset_recording_dir, annotations_recording_dir=None):
     """ Check that the recording is valid by checking the episodes flags and the detections (make sure they have the necessary keys)
 
     Args:
         args (argparse.Namespace): Arguments
-        recording_dir (str): Path to the recording directory
+        dataset_recording_dir (str): Path to the dataset recording directory (contains episodes_flag.json)
+        annotations_recording_dir (str): Path to the annotations recording directory (contains episodes with detections), defaults to dataset_recording_dir if None
 
     Returns:
         int: Number of valid episodes
     """
     
+    if annotations_recording_dir is None:
+        annotations_recording_dir = dataset_recording_dir
+    
     # Read the episodes flags to check that if they should be discarded altogether
-    episodes_flags_path = os.path.join(recording_dir, "episodes_flag.json")
+    episodes_flags_path = os.path.join(dataset_recording_dir, "episodes_flag.json")
     assert os.path.exists(episodes_flags_path), "Episodes flags file does not exist at {}".format(episodes_flags_path)
     episodes_flags = read_json_to_dic(episodes_flags_path)
     
@@ -74,16 +75,16 @@ def check_recording_validity(args, recording_dir):
             n_valid_episodes += 1
     
         # check that we have the necessary inputs in the episode
-        episode_dir = os.path.join(recording_dir, "episodes", episode_name)
+        episode_dir = os.path.join(annotations_recording_dir, "episodes", episode_name)
         assert os.path.isdir(episode_dir), "Episode directory does not exist at {}".format(episode_dir)
-        assert os.path.exists(os.path.join(episode_dir, "sam2_detections_360.json")), "Detections file does not exist at {}".format(os.path.join(episode_dir, "sam2_detections_360.json"))
+        assert os.path.exists(os.path.join(episode_dir, "annotations_360.json")), "Detections file does not exist at {}".format(os.path.join(episode_dir, "annotations_360.json"))
         
         # check that the images directory exists except if we allow empty dirs to work only with labels
         if not args.allow_empty_dirs:
             assert os.path.exists(os.path.join(episode_dir, "images_360")), "Images 360 directory does not exist at {}".format(os.path.join(episode_dir, "images_360"))
             
         # read the detections
-        detections_path = os.path.join(episode_dir, "sam2_detections_360.json")
+        detections_path = os.path.join(episode_dir, "annotations_360.json")
         detections_dict = read_json_to_dic(detections_path)
         
         # eventually check that the images exist and that the number of detections and images is the same except if we allow empty dirs to work only with labels
@@ -107,14 +108,14 @@ def check_recording_validity(args, recording_dir):
                 for key in expected_det_keys:
                     track_id = det["track_id"]
                     image_file = image_element["image_file"]
-                    assert key in det.keys(), "[{}][{}][{}][{} - track_id : {}] Key {} not found in detection (got : {}, validity : {}, image_file : {})".format(os.path.basename(recording_dir), episode_name, image_idx, det_idx, track_id, key, det.keys(), validity, image_file)
+                    assert key in det.keys(), "[{}][{}][{}][{} - track_id : {}] Key {} not found in detection (got : {}, validity : {}, image_file : {})".format(os.path.basename(dataset_recording_dir), episode_name, image_idx, det_idx, track_id, key, det.keys(), validity, image_file)
         
-        # print(os.path.basename(recording_dir), episode_name, "valid")
+        # print(os.path.basename(dataset_recording_dir), episode_name, "valid")
     
     if n_valid_episodes == 0:
-        prWarning("No valid episodes found in recording {}, will not export it".format(os.path.basename(recording_dir)))
+        prWarning("No valid episodes found in recording {}, will not export it".format(os.path.basename(dataset_recording_dir)))
     else:
-        prSuccess(f"{os.path.basename(recording_dir)} : {n_valid_episodes}/{len(episodes_flags)} valid episodes")
+        prSuccess(f"{os.path.basename(dataset_recording_dir)} : {n_valid_episodes}/{len(episodes_flags)} valid episodes")
     
     return n_valid_episodes
 
@@ -386,24 +387,25 @@ def is_track_valid(track_info,
     else:
         return []
     
-def get_episode_data(args, recording_dir, ep):
+def get_episode_data(args, dataset_recording_dir, annotations_recording_dir, ep):
     """ List tracks that meet a minimum of validity criteria
     and pass the raw data from detections to get_track_data, then concat all the dicts 
 
     Args:
         args (argparse.Namespace): Arguments
-        recording_dir (str): Path to the recording directory
+        dataset_recording_dir (str): Path to the dataset recording directory (for getting recording name)
+        annotations_recording_dir (str): Path to the annotations recording directory (contains episodes with detections)
         ep (str): Episode name
 
     Returns:
         pd.DataFrame: DataFrame for all the tracks of the episode with each line corresponding to one timestep and the columns being features (keypoints, box coordinates, scores, etc.)
     """
 
-    episode_dir = os.path.join(recording_dir, "episodes", ep)
+    episode_dir = os.path.join(annotations_recording_dir, "episodes", ep)
     assert os.path.isdir(episode_dir), "Episode directory does not exist at {}".format(episode_dir)
-    assert os.path.exists(os.path.join(episode_dir, "sam2_detections_360.json")), "Detections file does not exist at {}".format(os.path.join(episode_dir, "sam2_detections_360.json"))
+    assert os.path.exists(os.path.join(episode_dir, "annotations_360.json")), "Detections file does not exist at {}".format(os.path.join(episode_dir, "annotations_360.json"))
 
-    detections_path = os.path.join(episode_dir, "sam2_detections_360.json")
+    detections_path = os.path.join(episode_dir, "annotations_360.json")
     detections_dict = read_json_to_dic(detections_path)
 
     # Now investigate at the track level
@@ -424,7 +426,7 @@ def get_episode_data(args, recording_dir, ep):
             # add a column at the beginning of the dataframe with the track_id
             track_df.insert(0, "track_id", track_id)
             
-            unique_track_identifier = f"{os.path.basename(recording_dir)}_{ep}_{track_id}"
+            unique_track_identifier = f"{os.path.basename(dataset_recording_dir)}_{ep}_{track_id}"
             track_df.insert(0, "unique_track_identifier", unique_track_identifier)
             track_df.insert(0, "image_width", image_shape[1])
             track_df.insert(0, "image_height", image_shape[0])
@@ -436,18 +438,22 @@ def get_episode_data(args, recording_dir, ep):
 
     return tracks_df.copy()
 
-def get_recording_data(args, recording_dir):
+def get_recording_data(args, dataset_recording_dir, annotations_recording_dir=None):
     """ For each episode call get_episode_data and concatenate the data of the episodes
 
     Args:
         args (argparse.Namespace): Arguments
-        recording_dir (str): Path to the recording directory
+        dataset_recording_dir (str): Path to the dataset recording directory (contains episodes_flag.json)
+        annotations_recording_dir (str): Path to the annotations recording directory (contains episodes with detections), defaults to dataset_recording_dir if None
 
     Returns:
         pd.DataFrame: DataFrame for all the episodes of the recording with each line corresponding to one timestep and the columns being features (keypoints, box coordinates, scores, etc.)
     """
     
-    episodes_flags_path = os.path.join(recording_dir, "episodes_flag.json")
+    if annotations_recording_dir is None:
+        annotations_recording_dir = dataset_recording_dir
+    
+    episodes_flags_path = os.path.join(dataset_recording_dir, "episodes_flag.json")
     assert os.path.exists(episodes_flags_path), "Episodes flags file does not exist at {}".format(episodes_flags_path)
     episodes_flags = read_json_to_dic(episodes_flags_path)
     
@@ -457,87 +463,32 @@ def get_recording_data(args, recording_dir):
         if not valid_flags:
             continue
         
-        episode_df = get_episode_data(args, recording_dir, episode_name)
-        prSuccess(f"[{recording_dir}][{episode_name}] Got episode_df of length {len(episode_df)}")
+        episode_df = get_episode_data(args, dataset_recording_dir, annotations_recording_dir, episode_name)
+        prSuccess(f"[{dataset_recording_dir}][{episode_name}] Got episode_df of length {len(episode_df)}")
         if len(episode_df) > 0:
             # sometimes not a single track is valid, so we need to check
-            episode_df.insert(0, "recording", os.path.basename(recording_dir))
+            episode_df.insert(0, "recording", os.path.basename(dataset_recording_dir))
             episodes_dfs_list.append(episode_df.copy())
         else:
             pass
             # prWarning("No valid tracks found in episode {}, will not export it".format(episode_name))
     
     if len(episodes_dfs_list) == 0:
-        prWarning("No valid episodes found in recording {}, will not export it, all tracks, all episodes were invalid".format(os.path.basename(recording_dir)))
+        prWarning("No valid episodes found in recording {}, will not export it, all tracks, all episodes were invalid".format(os.path.basename(dataset_recording_dir)))
     
     episodes_df = pd.concat(episodes_dfs_list) if len(episodes_dfs_list) > 0 else pd.DataFrame()
     
     return episodes_df
 
-# def get_bg_image(args, recording_dir):
-#     """ Get one image to be used as background image in the dataset (take the first one in the middle episode)
-    
-#     Args:
-#         args (argparse.Namespace): arguments
-#         recording_dir (str): recording directory
-
-#     Returns:
-#         str: path to the background image
-#     """
-    
-#     all_episodes = os.listdir(os.path.join(recording_dir, "episodes"))
-#     n_episodes = len(all_episodes)
-#     use_episode = n_episodes // 2 # take the middle one there is less chance that someone is on the image
-    
-#     episode_dir = os.path.join(recording_dir, "episodes", f"{use_episode:04d}") # take in the middle one
-#     detections_path = os.path.join(episode_dir, "detections_sam2.json") if args.input == "images" else os.path.join(episode_dir, "detections_sam2_360.json")
-#     detections_dict = read_json_to_dic(detections_path)
-#     first_detection_element = detections_dict[0]
-#     first_detection_image_file = first_detection_element["image_file"]
-#     image_dir = os.path.join(episode_dir, "images") if args.input == "images" else os.path.join(episode_dir, "images_360")
-    
-#     if os.path.exists(os.path.join(image_dir, first_detection_image_file)):
-#         first_detection_image_path = os.path.join(image_dir, first_detection_image_file)
-#     else:
-#         # FOR DEBUG
-#         # check in other possible locations
-#         EPISODES_POSSILBLE_LOC1 = os.path.join("/media/raphael/hucedisk/ShelfyDatasetNameExtension/data_extractor", os.path.basename(recording_dir), "episodes", f"{use_episode:04d}")
-#         EPISODES_POSSILBLE_LOC2 = os.path.join("/media/raphael/hucedisk/ShelfyDatasetName/data_extractor", os.path.basename(recording_dir), "episodes", f"{use_episode:04d}")
-#         EPISODES_POSSILBLE_LOC3 = os.path.join("/media/raphael/hucedisk3/ShelfyDatasetNameNextExtension/data_extractor", os.path.basename(recording_dir), "episodes", f"{use_episode:04d}")
-        
-#         if os.path.exists(EPISODES_POSSILBLE_LOC1):
-#             image_dir = os.path.join(EPISODES_POSSILBLE_LOC1, "images") if args.input == "images" else os.path.join(EPISODES_POSSILBLE_LOC1, "images_360")
-#             first_detection_image_path = os.path.join(image_dir, first_detection_image_file)
-#             prInfo("Found background image at {}".format(first_detection_image_path))  
-#         elif os.path.exists(EPISODES_POSSILBLE_LOC2):
-#             image_dir = os.path.join(EPISODES_POSSILBLE_LOC2, "images") if args.input == "images" else os.path.join(EPISODES_POSSILBLE_LOC2, "images_360")
-#             first_detection_image_path = os.path.join(image_dir, first_detection_image_file)
-#             prInfo("Found background image at {}".format(first_detection_image_path))
-#         elif os.path.exists(EPISODES_POSSILBLE_LOC3):
-#             image_dir = os.path.join(EPISODES_POSSILBLE_LOC3, "images") if args.input == "images" else os.path.join(EPISODES_POSSILBLE_LOC3, "images_360")
-#             first_detection_image_path = os.path.join(image_dir, first_detection_image_file)
-#             prInfo("Found background image at {}".format(first_detection_image_path))
-#         else:
-#             raise ValueError(f"No background image found at {first_detection_image_path} nor at {EPISODES_POSSILBLE_LOC1} nor at {EPISODES_POSSILBLE_LOC2} nor at {EPISODES_POSSILBLE_LOC3}")
-
-#     assert os.path.exists(first_detection_image_path), "Image file does not exist at {}".format(first_detection_image_path)    
-
-#     return first_detection_image_path
-
-def check_recording_validity_wrapper(args_and_recording):
+def check_recording_validity_wrapper(args_and_dirs):
     """Wrapper function for multiprocessing check_recording_validity"""
-    args, recording_dir = args_and_recording
-    return check_recording_validity(args, recording_dir)
+    args, dataset_recording_dir, annotations_recording_dir = args_and_dirs
+    return check_recording_validity(args, dataset_recording_dir, annotations_recording_dir)
 
-def get_recording_data_wrapper(args_and_recording):
+def get_recording_data_wrapper(args_and_dirs):
     """Wrapper function for multiprocessing get_recording_data"""
-    args, recording_dir = args_and_recording
-    return get_recording_data(args, recording_dir)
-
-# def get_bg_image_wrapper(args_and_recording):
-#     """Wrapper function for multiprocessing get_bg_image"""
-#     args, recording_dir = args_and_recording
-#     return get_bg_image(args, recording_dir)
+    args, dataset_recording_dir, annotations_recording_dir = args_and_dirs
+    return get_recording_data(args, dataset_recording_dir, annotations_recording_dir)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -545,6 +496,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", "-i", type=str, default="images_360", help="Input type (only supports images_360)")
     parser.add_argument("--recordings", "-r", type=str, default="all", help="Recordings to export, all or a list of recordings names")
     parser.add_argument("--allow_empty_dirs", "-ed", action="store_true", default=False, help="Allow empty directories to be processed")
+    parser.add_argument("--splitted_dataset", "-sd", action="store_true", default=False, help="Use splitted dataset mode, the data and the annotations are separated into different directories (default: %(default)s)")
     parser.add_argument("--workers", "-w", type=int, default=1, help="Number of workers to use")
     args = parser.parse_args()
 
@@ -557,21 +509,32 @@ if __name__ == "__main__":
     
     if args.recordings == "all":
         # only keep directories
-        recordings_list = [f for f in os.listdir(os.path.join(args.dir)) if os.path.isdir(os.path.join(args.dir, f))]
+        if args.splitted_dataset:
+            recordings_list = [f for f in os.listdir(os.path.join(args.dir, "dataset")) if os.path.isdir(os.path.join(args.dir, "dataset", f))]
+        else:
+            recordings_list = [f for f in os.listdir(os.path.join(args.dir)) if os.path.isdir(os.path.join(args.dir, f))]
     else:
         recordings_list = args.recordings.split(",")
         
     recordings_list.sort()
+    recordings_list = [r for r in recordings_list if not r.startswith(".")]
     
 
     
     # validity check first - parallelized
     prInfo(f"Checking {len(recordings_list)} recordings validity (using {args.workers} workers)")
-    recording_args_list = [(args, os.path.join(args.dir, recording)) for recording in recordings_list]
-    
-    # Validate that all recording directories exist before parallel processing
+    recording_args_list = []
     for recording in recordings_list:
-        assert os.path.isdir(os.path.join(args.dir, recording)), "Recording {} should exist and be a directory".format(recording)
+        if args.splitted_dataset:
+            assert os.path.isdir(os.path.join(args.dir, "dataset", recording)), "Dataset directory {} should exist and be a directory".format(os.path.join(args.dir, "dataset", recording))
+            dataset_recording_dir = os.path.join(args.dir, "dataset", recording)
+            assert os.path.isdir(os.path.join(args.dir, "annotations", recording)), "Annotations directory {} should exist and be a directory".format(os.path.join(args.dir, "annotations", recording))
+            annotations_recording_dir = os.path.join(args.dir, "annotations", recording)
+        else:
+            dataset_recording_dir = os.path.join(args.dir, recording)
+            assert os.path.isdir(dataset_recording_dir), "Recording {} should exist and be a directory".format(dataset_recording_dir)
+            annotations_recording_dir = None
+        recording_args_list.append((args, dataset_recording_dir, annotations_recording_dir))
     
     # Check validity in parallel
     with mp.Pool(processes=args.workers) as pool:
@@ -579,10 +542,12 @@ if __name__ == "__main__":
     
     # Only extract tracks if there is at least one valid episode
     valid_recordings = []
-    for recording, n_valid_episodes in zip(recordings_list, validity_results):
+    valid_recording_args_list = []
+    for recording, n_valid_episodes, (args, dataset_recording_dir, annotations_recording_dir) in zip(recordings_list, validity_results, recording_args_list):
         if n_valid_episodes > 0:
             prSuccess(f"Recording {recording} is valid ({n_valid_episodes} episodes are valid) and will be exported later")
             valid_recordings.append(recording)
+            valid_recording_args_list.append((args, dataset_recording_dir, annotations_recording_dir))
         else:
             prWarning(f"Recording {recording} has no valid episodes and will be skipped")
     
@@ -592,7 +557,6 @@ if __name__ == "__main__":
     
     # Get recording data (i.e. extract tracks)
     prInfo("Getting recording data in parallel...")
-    valid_recording_args_list = [(args, os.path.join(args.dir, recording)) for recording in valid_recordings]
                 
     with mp.Pool(processes=args.workers) as pool:
     # with mp.Pool(processes=1) as pool:
@@ -600,19 +564,21 @@ if __name__ == "__main__":
         recording_data_results = pool.map(get_recording_data_wrapper, valid_recording_args_list)
         
     # Process results
-    recording_bg_images = {}
     recordings_dfs_list = []
     
     for recording, recording_df in zip(valid_recordings, recording_data_results):
         prSuccess(f"Got data for recording {recording} (entries : {len(recording_df)}, unique tracks : {len(recording_df['unique_track_identifier'].unique()) if len(recording_df) > 0 else 0})")
         recordings_dfs_list.append(recording_df)
-        recording_bg_images[recording] = None # moving so no bg to export
 
     assert len(recordings_dfs_list) > 0, "No recordings found or all invalid"
     timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     dataset_name = f"exported_dataset_{args.input}_{timestamp}"
     # save the dataset in a directory
-    dataset_dir = os.path.join(args.dir, "..", "exported_datasets", dataset_name)
+    dirname = args.dir.split("/")[-1] if args.dir.split("/")[-1] != "" else args.dir.split("/")[-2]
+    dataset_dir = os.path.join(args.dir, "..", dirname+"_exported_datasets", dataset_name)
+    if not os.path.exists(os.path.join(args.dir, "..", dirname+"_exported_datasets")):
+        prInfo("Creating exported datasets directory at absolute path {}".format(os.path.join(args.dir, "..", dirname+"_exported_datasets")))
+        os.makedirs(os.path.join(args.dir, "..", dirname+"_exported_datasets"))
     os.makedirs(dataset_dir, exist_ok=True)
     
     for count, recording_df in enumerate(recordings_dfs_list):
@@ -624,18 +590,5 @@ if __name__ == "__main__":
     # dataset_path = os.path.join(dataset_dir, f"dataset.csv")
     # recordings_df.to_csv(dataset_path, index=False)
     # prSuccess(f"Exported data to {dataset_path} (entries : {len(recordings_df)}, unique tracks : {len(recordings_df['unique_track_identifier'].unique())})")
-    
-    # save the background images in the dataset directory
-    os.makedirs(os.path.join(dataset_dir, "background_images"), exist_ok=True)
-    for recording, bg_image_path in recording_bg_images.items():
-        if bg_image_path is not None:
-            shutil.copy(bg_image_path, os.path.join(dataset_dir, "background_images", f"{recording}.jpg"))
-        else:
-            #prWarning(f"No background image found for recording {recording}, skipping")
-            # Create 3840x1920 empty image
-            bg_image = np.zeros((1920, 3840, 3), dtype=np.uint8)
-            cv2.imwrite(os.path.join(dataset_dir, "background_images", f"{recording}.jpg"), bg_image)
-            
-    prSuccess(f"Copied background images")
 
     prSuccess(f"Exported dataset to {dataset_dir}")

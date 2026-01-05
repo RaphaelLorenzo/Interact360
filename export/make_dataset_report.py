@@ -164,14 +164,17 @@ def count_tracks_with_conditions(tracks_infos,
             
     return tracks_count, tracks_contiguous_count, segments_count, subsets_count
 
-def make_recording_report(args, recording_dir):
-    episodes_flags_path = os.path.join(recording_dir, "episodes_flag.json")
+def make_recording_report(args, dataset_recording_dir, annotations_recording_dir = None):
+    episodes_flags_path = os.path.join(dataset_recording_dir, "episodes_flag.json")
+    
+    if annotations_recording_dir is None:
+        annotations_recording_dir = dataset_recording_dir
     
     #### FOR DEBUG
     # if not os.path.exists(episodes_flags_path):
-    #     EPISODES_POSSILBLE_LOC = os.path.join("/media/raphael/hucedisk3/ShelfyDatasetNameNextExtension/data_extractor", os.path.basename(recording_dir), "episodes_flag.json")
-    #     EPISODES_POSSILBLE_LOC1 = os.path.join("/media/raphael/hucedisk/ShelfyDatasetNameExtension/data_extractor", os.path.basename(recording_dir), "episodes_flag.json")
-    #     EPISODES_POSSILBLE_LOC2 = os.path.join("/media/raphael/hucedisk/ShelfyDatasetName/data_extractor", os.path.basename(recording_dir), "episodes_flag.json")
+    #     EPISODES_POSSILBLE_LOC = os.path.join("/media/raphael/hucedisk3/ShelfyDatasetNameNextExtension/data_extractor", os.path.basename(dataset_recording_dir), "episodes_flag.json")
+    #     EPISODES_POSSILBLE_LOC1 = os.path.join("/media/raphael/hucedisk/ShelfyDatasetNameExtension/data_extractor", os.path.basename(dataset_recording_dir), "episodes_flag.json")
+    #     EPISODES_POSSILBLE_LOC2 = os.path.join("/media/raphael/hucedisk/ShelfyDatasetName/data_extractor", os.path.basename(dataset_recording_dir), "episodes_flag.json")
     #     if os.path.exists(EPISODES_POSSILBLE_LOC):
     #         # copy to expected location
     #         shutil.copy(EPISODES_POSSILBLE_LOC, episodes_flags_path)
@@ -199,7 +202,7 @@ def make_recording_report(args, recording_dir):
         valid_flags = is_episode_usable(args, episode_data["flag"])
         
         # check that we have the necessary inputs in the episode
-        episode_dir = os.path.join(recording_dir, "episodes", episode_name)
+        episode_dir = os.path.join(annotations_recording_dir, "episodes", episode_name)
         
         # # check that the detections are valid
         # # detections_path = os.path.join(episode_dir, "detections_sam2.json")
@@ -222,7 +225,7 @@ def make_recording_report(args, recording_dir):
         
         # same for 360
         # detections_path_360 = os.path.join(episode_dir, "detections_sam2_360.json")
-        detections_path_360 = os.path.join(episode_dir, "sam2_detections_360.json")
+        detections_path_360 = os.path.join(episode_dir, "annotations_360.json")
         try:
             detections_dict_360 = read_json_to_dic(detections_path_360)
         except Exception as e:
@@ -255,7 +258,7 @@ def make_recording_report(args, recording_dir):
         total_dets = [sum(len(element["detections"]) for element in detections_dict_360)]
 
 
-        prInfo(f"[{os.path.basename(recording_dir)}][{episode_name} : {valid_flags}] {len(detections_dict_360)} images 360 | {total_dets} total detections")
+        prInfo(f"[{os.path.basename(annotations_recording_dir)}][{episode_name} : {valid_flags}] {len(detections_dict_360)} images 360 | {total_dets} total detections")
         # Now investigate at the track level
         # tracks_infos = get_tracks_infos(detections_dict, engagement_key="engagement_level_auto_1", allow_skip = not valid_flags)
         tracks_infos_360 = get_tracks_infos(detections_dict_360, engagement_key="engagement_level", allow_skip = not valid_flags)
@@ -372,24 +375,39 @@ def make_recording_report(args, recording_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", "-d", type=str, default="./output/")
-    parser.add_argument("--recordings", "-r", type=str, default="all", help="Recordings to export, all or a list of recordings names")
-    parser.add_argument("--allow_empty_dirs", "-ed", action="store_true", default=False, help="Allow empty directories to be processed")
+    parser.add_argument("--recordings", "-r", type=str, default="all", help="Recordings to export, all or a list of recordings names (default: %(default)s)")
+    parser.add_argument("--allow_empty_dirs", "-ed", action="store_true", default=False, help="Allow empty directories to be processed (default: %(default)s)")
+    parser.add_argument("--splitted_dataset", "-sd", action="store_true", default=False, help="Use splitted dataset mode, the data and the annotations are separated into different directories (default: %(default)s)")
     args = parser.parse_args()
     
     assert os.path.isdir(args.dir), "Directory should exist at {}".format(args.dir)
     
     if args.recordings == "all":
         # only keep directories
-        recordings_list = [f for f in os.listdir(os.path.join(args.dir)) if os.path.isdir(os.path.join(args.dir, f))]
+        if args.splitted_dataset:
+            recordings_list = [f for f in os.listdir(os.path.join(args.dir, "dataset")) if os.path.isdir(os.path.join(args.dir, "dataset", f))]
+        else:
+            recordings_list = [f for f in os.listdir(os.path.join(args.dir)) if os.path.isdir(os.path.join(args.dir, f))]
     else:
         recordings_list = args.recordings.split(",")
         
     recordings_list.sort()
+    recordings_list = [r for r in recordings_list if not r.startswith(".")]
     
     df_elements = []
     for recording in recordings_list:
-        assert os.path.isdir(os.path.join(args.dir, recording)), "Recording {} should exist and be a directory".format(recording)
-        episodes_reports = make_recording_report(args, os.path.join(args.dir, recording)) # trigger assertions from inside the function in case of problems
+        if args.splitted_dataset:
+            assert os.path.isdir(os.path.join(args.dir, "dataset", recording)), "Dataset directory {} should exist and be a directory".format(os.path.join(args.dir, "dataset", recording))
+            dataset_recording_dir = os.path.join(args.dir, "dataset", recording)
+            assert os.path.isdir(os.path.join(args.dir, "annotations", recording)), "Annotations directory {} should exist and be a directory".format(os.path.join(args.dir, "annotations", recording))
+            annotations_recording_dir = os.path.join(args.dir, "annotations", recording)
+        else:
+            dataset_recording_dir = os.path.join(args.dir, recording)
+            assert os.path.isdir(dataset_recording_dir), "Recording {} should exist and be a directory".format(dataset_recording_dir)
+            annotations_recording_dir = None
+        
+        episodes_reports = make_recording_report(args, dataset_recording_dir, annotations_recording_dir) # trigger assertions from inside the function in case of problems
+            
         for ep, ep_report in episodes_reports.items():
             place = RECORDING_TO_PLACE[recording] if recording in RECORDING_TO_PLACE else "Unknown"
             df_elements.append({
@@ -402,10 +420,11 @@ if __name__ == "__main__":
     df = pd.DataFrame(df_elements)
     
     timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    report_path = os.path.join(args.dir, "..", "dataset_reports", "dataset_report_{}.csv".format(timestamp))
-    if not os.path.exists(os.path.join(args.dir, "..", "dataset_reports")):
-        prInfo("Creating dataset reports directory at absolute path {}".format(os.path.join(args.dir, "..", "dataset_reports")))
-        os.makedirs(os.path.join(args.dir, "..", "dataset_reports"))
+    dirname = args.dir.split("/")[-1] if args.dir.split("/")[-1] != "" else args.dir.split("/")[-2]
+    report_path = os.path.join(args.dir, "..", dirname+"_dataset_reports", "dataset_report_{}.csv".format(timestamp))
+    if not os.path.exists(os.path.join(args.dir, "..", dirname+"_dataset_reports")):
+        prInfo("Creating dataset reports directory at absolute path {}".format(os.path.join(args.dir, "..", dirname+"_dataset_reports")))
+        os.makedirs(os.path.join(args.dir, "..", dirname+"_dataset_reports"))
     df.to_csv(report_path, index=False)
     prInfo("Dataset report saved at {}".format(report_path))
         
