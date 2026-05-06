@@ -1,5 +1,12 @@
 # Interact360
 
+Code for processing pipeline of human-robot interaction detection on HUI360 dataset as presented in "HUI360: A dataset and baselines for Human Robot Interaction Anticipation" (FG2026).
+
+[![Paper](https://img.shields.io/badge/paper-HAL%20Science-blue)](https://hal.science/view/index/docid/5609928)
+[![arXiv](https://img.shields.io/badge/arXiv-TDB-lightgrey)](https://arxiv.org/abs/TDB)
+[![Website](https://img.shields.io/badge/website-hui360-green)](https://hucebot.github.io/hui360/)
+
+
 ![concept_tracking](illustrations/concept_tracking.jpg)
 
 
@@ -451,6 +458,15 @@ The tools will also create backups when modifying the tracks for example. You wi
 </details>
 
 
+## Citation
+```
+@article{TBD,
+  author    = {Raphael Lorenzo-Louis and Fabio Amadio and Bertrand Luvison and Serena Ivaldi},
+  title     = {HUI360: A dataset and baselines for Human Robot Interaction Anticipation},
+  journal   = {TBD},
+  year      = {2026},
+}
+```
 
 ## Acknowledgement 
 - SAM2
