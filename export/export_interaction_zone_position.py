@@ -56,7 +56,9 @@ def process_recording(args, recording_name):
             image_height = 1920
             interaction_zone_center_x_list = [int(image_width / 2)] * len(images_list)
             interaction_zone_center_y_list = [int(image_height)] * len(images_list)
-            recording_interaction_zone_center_positions[episode_name] = interaction_zone_center_x_list, interaction_zone_center_y_list
+            recording_interaction_zone_center_positions[episode_name] = {}
+            recording_interaction_zone_center_positions[episode_name]["interaction_zone_center_x"] = interaction_zone_center_x_list
+            recording_interaction_zone_center_positions[episode_name]["interaction_zone_center_y"] = interaction_zone_center_y_list
         else:
             # use the interaction zone tracking file
             assert os.path.exists(os.path.join(episode_dir, "interaction_zone_tracking_360.json")), "Interaction zone tracking file does not exist at {}".format(os.path.join(episode_dir, "interaction_zone_tracking_360.json"))

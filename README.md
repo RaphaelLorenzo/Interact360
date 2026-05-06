@@ -49,6 +49,14 @@ python ./process/detect_segment_and_track.py -d ./demo/output/ClubInteract-TCAn 
 python ./process/detect_segment_and_track.py -d ./demo/output/ClubInteract-TCAn -sm base -sibs 1 --disp
 ```
 
+<details>
+<summary>Illustration example</summary>
+
+![concept_tracking](illustrations/360tracking.gif)
+
+</details>
+
+
 Detect the interactions using the default mask
 ```
 python ./process/detect_interactions.py -d ./demo/output/ClubInteract-TCAn

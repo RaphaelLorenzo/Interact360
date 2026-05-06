@@ -771,6 +771,45 @@ class EpisodePreloadWorker(QThread):
             self.error.emit(self.episode_idx, error_msg)
 
 
+class ExportFramesWorker(QThread):
+    """Worker thread to export visualizer frames to disk."""
+    progress = pyqtSignal(int, int, str)  # current_idx, total, last_path
+    finished = pyqtSignal(str, int)  # export_dir, exported_count
+    error = pyqtSignal(str)  # error_message
+
+    def __init__(self, visualizer, export_dir: str):
+        super().__init__()
+        self.visualizer = visualizer
+        self.export_dir = export_dir
+
+    def run(self):
+        try:
+            total = len(self.visualizer.image_files)
+            exported = 0
+
+            for i in range(total):
+                if self.isInterruptionRequested():
+                    break
+
+                image_bgr, image_name = self.visualizer.render_frame_for_export(i)
+                out_path = os.path.join(self.export_dir, f"{image_name}.jpg")
+
+                ok = cv2.imwrite(out_path, image_bgr)
+                if not ok:
+                    raise RuntimeError(f"Failed to write image: {out_path}")
+
+                exported += 1
+                # Update UI occasionally (and always on first/last frame)
+                if i == 0 or i == total - 1 or (i % 10) == 0:
+                    self.progress.emit(i + 1, total, out_path)
+
+            self.finished.emit(self.export_dir, exported)
+
+        except Exception as e:
+            import traceback
+            self.error.emit(f"Export error: {str(e)}\n{traceback.format_exc()}")
+
+
 class Interact360Visualizer(QMainWindow):
     def __init__(self, args):
         super().__init__()
@@ -830,6 +869,9 @@ class Interact360Visualizer(QMainWindow):
         # Preloading support
         self.preload_worker = None  # Background worker for preloading
         self.preloaded_data = {}  # Cache for preloaded episode data: {episode_idx: {'detections': ..., 'video_frames': ..., 'video_path': ...}}
+
+        # Export support
+        self.export_worker = None
         
         # Image rolling to center interaction mask
         self.enable_image_rolling = True  # Enable/disable image rolling (enabled by default)
@@ -1105,6 +1147,14 @@ class Interact360Visualizer(QMainWindow):
         play_layout.addWidget(self.auto_speed_cb)
         
         layout.addWidget(play_group)
+
+        # Export controls
+        export_group = QGroupBox("Export")
+        export_layout = QVBoxLayout(export_group)
+        self.export_frames_btn = QPushButton("Export Frames (Visualization)")
+        self.export_frames_btn.clicked.connect(self.export_frames)
+        export_layout.addWidget(self.export_frames_btn)
+        layout.addWidget(export_group)
         
         # Display options
         options_group = QGroupBox("Display Options")
@@ -2101,6 +2151,122 @@ class Interact360Visualizer(QMainWindow):
         self.info_label.setText(info_text)
         tac_global = time.time()
         # prTimer(f"Update image display", tic_global, tac_global)
+
+    def get_current_episode_export_root(self) -> str:
+        """Return `[NAME]/episodes/XXXX/visualizer_export` path for the current episode."""
+        session, episode, _ = self.episodes_list[self.current_episode_idx]
+        episode_dir = self.get_episode_dir(session, episode)
+        return os.path.join(episode_dir, "visualizer_export")
+
+    def render_frame_for_export(self, frame_idx: int) -> Tuple[np.ndarray, str]:
+        """
+        Render a frame as BGR image (OpenCV) with the same overlays as the UI.
+        Returns (image_bgr, image_name_without_ext).
+        """
+        if frame_idx < 0 or frame_idx >= len(self.image_files):
+            raise IndexError(f"Frame index out of bounds: {frame_idx}")
+
+        prev_frame = self.current_frame
+        prev_roll_offset = self.horizontal_roll_offset
+        try:
+            self.current_frame = frame_idx
+
+            # Use edited detections if in edit mode and available
+            if self.edit_mode and frame_idx in self.edited_detections:
+                detections = self.edited_detections[frame_idx]["detections"]
+            else:
+                detections = self.detections[frame_idx]["detections"] if frame_idx in self.detections else []
+
+            # Load image or get frame from video
+            if self.video_mode:
+                if self.video_frames is not None and len(self.video_frames) > 0:
+                    if frame_idx >= len(self.video_frames):
+                        raise RuntimeError(f"Video frame {frame_idx} not available")
+                    image = self.video_frames[frame_idx].copy()
+                elif self.video_cap is not None:
+                    self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    ret, image = self.video_cap.read()
+                    if not ret:
+                        raise RuntimeError(f"Failed to read frame {frame_idx} from video")
+                else:
+                    raise RuntimeError("Video not loaded properly")
+            else:
+                image_file = self.image_files[frame_idx]
+                image = cv2.imread(image_file)
+                if image is None:
+                    raise RuntimeError(f"Could not load image: {image_file}")
+
+            # Mirror the UI logic for dimension bookkeeping
+            if not self.video_mode or getattr(self, "image_height", None) is None:
+                self.image_height, self.image_width = image.shape[:2]
+
+            if self.use_mini and (self.full_image_height is None or self.full_image_width is None):
+                self.full_image_height = int(self.image_height * self.scale_factor)
+                self.full_image_width = int(self.image_width * self.scale_factor)
+            elif not self.use_mini and (self.full_image_height is None or self.full_image_width is None):
+                self.full_image_height = self.image_height
+                self.full_image_width = self.image_width
+
+            # Draw overlays and apply rolling (uses self.current_frame internally)
+            image = self.draw_tracks_on_image(image, detections)
+            image = self.apply_horizontal_roll(image)
+
+            # Build stable output name
+            src = self.image_files[frame_idx]
+            base = os.path.basename(src)
+            name, ext = os.path.splitext(base)
+            image_name = name if name else f"frame_{frame_idx:06d}"
+
+            return image, image_name
+
+        finally:
+            self.current_frame = prev_frame
+            self.horizontal_roll_offset = prev_roll_offset
+
+    def export_frames(self):
+        """Export rendered visualization frames to `[NAME]/episodes/XXXX/visualizer_export/<timestamp>/`."""
+        if not self.image_files:
+            QMessageBox.warning(self, "Export", "No frames loaded to export.")
+            return
+
+        # Stop playback during export (prevents confusing UI state)
+        if self.is_playing:
+            self.toggle_play_pause()
+
+        timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        export_root = self.get_current_episode_export_root()
+        export_dir = os.path.join(export_root, timestamp)
+        os.makedirs(export_dir, exist_ok=True)
+
+        # Cancel any previous export worker
+        if self.export_worker is not None and self.export_worker.isRunning():
+            self.export_worker.requestInterruption()
+            self.export_worker.wait(2000)
+
+        self.export_frames_btn.setEnabled(False)
+        self.statusBar().showMessage(f"Exporting frames to: {export_dir}")
+
+        self.export_worker = ExportFramesWorker(self, export_dir=export_dir)
+        self.export_worker.progress.connect(self._on_export_progress)
+        self.export_worker.finished.connect(self._on_export_finished)
+        self.export_worker.error.connect(self._on_export_error)
+        self.export_worker.start()
+
+    @pyqtSlot(int, int, str)
+    def _on_export_progress(self, current: int, total: int, last_path: str):
+        self.statusBar().showMessage(f"Exporting frames: {current}/{total} (last: {os.path.basename(last_path)})")
+
+    @pyqtSlot(str, int)
+    def _on_export_finished(self, export_dir: str, exported_count: int):
+        self.export_frames_btn.setEnabled(True)
+        self.statusBar().showMessage(f"Exported {exported_count} frames to: {export_dir}")
+        QMessageBox.information(self, "Export complete", f"Exported {exported_count} frames to:\n{export_dir}")
+
+    @pyqtSlot(str)
+    def _on_export_error(self, error_message: str):
+        self.export_frames_btn.setEnabled(True)
+        self.statusBar().showMessage("Export failed")
+        QMessageBox.critical(self, "Export failed", error_message)
     
     def apply_horizontal_roll(self, image):
         """Apply horizontal roll to center the interaction mask"""
